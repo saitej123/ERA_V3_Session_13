@@ -222,6 +222,11 @@ class SmolLM2(nn.Module):
             persistent=False,
         )
 
+    @property
+    def device(self) -> torch.device:
+        """Get the device the model parameters are on."""
+        return next(self.parameters()).device
+
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
             torch.nn.init.normal_(module.weight, mean=0.0, std=self.config.initializer_range)
