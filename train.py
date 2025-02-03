@@ -18,6 +18,14 @@ import wandb
 
 from model.model import SmolLM2, SmolLM2Config
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Train SmolLM2')
+    parser.add_argument('--config', type=str, default='config.yaml', help='Path to config file')
+    parser.add_argument('--checkpoint_path', type=str, default=None, help='Path to checkpoint to resume from')
+    parser.add_argument('--train_steps', type=int, default=None, help='Number of training steps')
+    parser.add_argument('--start_step', type=int, default=0, help='Starting step for continued training')
+    return parser.parse_args()
+
 # Set environment variables
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Add this for better error messages
@@ -435,14 +443,7 @@ def train(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, required=True, help="Path to config file")
-    parser.add_argument("--input_file", type=str, required=True, help="Path to input text file")
-    parser.add_argument("--save_dir", type=str, required=True, help="Directory to save checkpoints")
-    parser.add_argument("--train_steps", type=int, required=True, help="Number of training steps")
-    parser.add_argument("--checkpoint_path", type=str, help="Path to checkpoint to resume from")
-    parser.add_argument("--disable_wandb", action="store_true", help="Disable WandB logging")
-    args = parser.parse_args()
+    args = parse_args()
 
     # Set WandB disabled environment variable if specified
     if args.disable_wandb:

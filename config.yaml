@@ -29,12 +29,12 @@ training:
   max_grad_norm: 1.0
   
   # Training process parameters
-  batch_size: 14
+  batch_size: 32
   gradient_accumulation_steps: 4
   
   # Training duration parameters
   warmup_steps: 100
-  eval_steps: 100
+  eval_steps: 500
   save_steps: 500
   prediction_steps: 500
   
@@ -64,7 +64,7 @@ wandb:
   watch: "gradients"
   
   # Logging frequencies
-  log_every: 1  # Log every step
+  log_every: 500  # Log every 500 steps
   save_steps: 500
   
   # Text generation logging
