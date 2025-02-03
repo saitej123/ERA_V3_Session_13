@@ -310,4 +310,94 @@ class SmolLM2(nn.Module):
             return logits, loss
         
         return logits, None
+
+    def generate(
+        self,
+        input_ids: torch.Tensor,
+        max_length: int = 100,
+        temperature: float = 1.0,
+        top_k: int = 50,
+        top_p: float = 0.95,
+        do_sample: bool = True,
+        pad_token_id: Optional[int] = None,
+        eos_token_id: Optional[int] = None,
+    ) -> torch.Tensor:
+        """Generate text using the model with top-k and nucleus sampling.
+        
+        Args:
+            input_ids: Input token IDs
+            max_length: Maximum length of generated sequence
+            temperature: Sampling temperature (higher = more random)
+            top_k: Number of highest probability tokens to keep for top-k sampling
+            top_p: Cumulative probability for nucleus sampling
+            do_sample: If False, use greedy decoding instead of sampling
+            pad_token_id: Token ID for padding
+            eos_token_id: Token ID for end of sequence
+            
+        Returns:
+            Generated token IDs
+        """
+        if input_ids.dim() == 1:
+            input_ids = input_ids.unsqueeze(0)
+            
+        batch_size = input_ids.shape[0]
+        cur_len = input_ids.shape[1]
+        device = input_ids.device
+        
+        unfinished_sequences = torch.ones(batch_size, dtype=torch.long, device=device)
+        
+        while cur_len < max_length:
+            # Forward pass
+            with torch.no_grad():
+                outputs, _ = self.forward(input_ids)
+                next_token_logits = outputs[:, -1, :] / temperature
+            
+            # Prevent sampling of pad token
+            if pad_token_id is not None:
+                next_token_logits[:, pad_token_id] = float('-inf')
+                
+            if do_sample:
+                # Top-k sampling
+                if top_k > 0:
+                    indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k)[0][..., -1, None]
+                    next_token_logits[indices_to_remove] = float('-inf')
+                
+                # Top-p sampling
+                if top_p < 1.0:
+                    sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
+                    cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                    
+                    # Remove tokens with cumulative probability above the threshold
+                    sorted_indices_to_remove = cumulative_probs > top_p
+                    # Shift the indices to the right to keep also the first token above the threshold
+                    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                    sorted_indices_to_remove[..., 0] = 0
+                    
+                    # Scatter sorted tensors to original indexing
+                    indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
+                    next_token_logits[indices_to_remove] = float('-inf')
+                
+                # Sample from filtered distribution
+                probs = F.softmax(next_token_logits, dim=-1)
+                next_tokens = torch.multinomial(probs, num_samples=1)
+            else:
+                # Greedy decoding
+                next_tokens = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            
+            # Check if sequences are finished
+            if eos_token_id is not None:
+                tokens_to_add = next_tokens * unfinished_sequences.unsqueeze(-1)
+                unfinished_sequences = unfinished_sequences.mul((tokens_to_add.squeeze(-1) != eos_token_id).long())
+            else:
+                tokens_to_add = next_tokens
+            
+            # Add generated tokens to sequence
+            input_ids = torch.cat([input_ids, tokens_to_add], dim=-1)
+            cur_len = input_ids.shape[1]
+            
+            # Early stopping if all sequences are finished
+            if unfinished_sequences.max() == 0:
+                break
+                
+        return input_ids
         
