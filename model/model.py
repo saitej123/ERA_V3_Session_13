@@ -11,6 +11,7 @@ from rotary_embedding_torch import RotaryEmbedding
 
 @dataclass
 class SmolLM2Config:
+    name: str = "SmolLM2-135"
     hidden_dim: int = 768
     n_layers: int = 12
     n_heads: int = 12

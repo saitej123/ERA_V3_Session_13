@@ -5,6 +5,7 @@ import math
 import logging
 from pathlib import Path
 from typing import Optional
+from dataclasses import fields
 
 import torch
 import torch.nn as nn
@@ -72,16 +73,29 @@ def save_checkpoint(
     loss: float,
     save_dir: str,
 ):
-    checkpoint = {
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
-        'step': step,
-        'loss': loss,
-    }
-    Path(save_dir).mkdir(parents=True, exist_ok=True)
-    torch.save(checkpoint, os.path.join(save_dir, f'step_{step}.pt'))
-    logger.info(f"Saved checkpoint at step {step}")
+    try:
+        checkpoint = {
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
+            'step': step,
+            'loss': loss,
+        }
+        Path(save_dir).mkdir(parents=True, exist_ok=True)
+        checkpoint_path = os.path.join(save_dir, f'step_{step}.pt')
+        
+        # Save to a temporary file first
+        temp_path = checkpoint_path + '.tmp'
+        torch.save(checkpoint, temp_path)
+        
+        # Rename the temporary file to the final name
+        os.replace(temp_path, checkpoint_path)
+        
+        logger.info(f"Saved checkpoint at step {step} to {checkpoint_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save checkpoint at step {step}: {str(e)}")
+        return False
 
 
 def load_checkpoint(
@@ -120,7 +134,11 @@ def train(args):
 
     # Load configuration
     config = load_config(args.config)
-    model_config = SmolLM2Config(**config['model'])
+    
+    # Filter out any config keys that aren't in SmolLM2Config
+    valid_config_keys = {f.name for f in fields(SmolLM2Config)}
+    model_config_dict = {k: v for k, v in config['model'].items() if k in valid_config_keys}
+    model_config = SmolLM2Config(**model_config_dict)
 
     # Initialize accelerator
     accelerator = Accelerator(
@@ -152,6 +170,8 @@ def train(args):
     # Load checkpoint if specified
     start_step = 0
     if args.checkpoint_path:
+        if not os.path.exists(args.checkpoint_path):
+            raise FileNotFoundError(f"Checkpoint not found: {args.checkpoint_path}")
         start_step, _ = load_checkpoint(args.checkpoint_path, model, optimizer, scheduler)
         logger.info(f"Loaded checkpoint from step {start_step}")
 
@@ -165,40 +185,59 @@ def train(args):
     data_iter = iter(dataloader)
     total_steps = start_step + args.train_steps
     step = start_step
+    last_save_successful = True
 
-    while step < total_steps:
-        try:
-            batch = next(data_iter)
-        except StopIteration:
-            data_iter = iter(dataloader)
-            batch = next(data_iter)
+    try:
+        while step < total_steps:
+            try:
+                batch = next(data_iter)
+            except StopIteration:
+                data_iter = iter(dataloader)
+                batch = next(data_iter)
 
-        with accelerator.accumulate(model):
-            outputs, loss = model(batch, labels=batch)
-            accelerator.backward(loss)
-            
-            if accelerator.sync_gradients:
-                accelerator.clip_grad_norm_(model.parameters(), config['training']['max_grad_norm'])
-            
-            optimizer.step()
-            scheduler.step()
-            optimizer.zero_grad()
+            with accelerator.accumulate(model):
+                outputs, loss = model(batch, labels=batch)
+                accelerator.backward(loss)
+                
+                if accelerator.sync_gradients:
+                    accelerator.clip_grad_norm_(model.parameters(), config['training']['max_grad_norm'])
+                
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad()
 
-        if step % config['training']['eval_steps'] == 0:
-            avg_loss = accelerator.gather(loss).mean().item()
-            logger.info(f"Step {step}: loss = {avg_loss:.4f}")
-            wandb.log({
-                "loss": avg_loss,
-                "learning_rate": scheduler.get_last_lr()[0],
-                "step": step,
-            })
+            if step % config['training']['eval_steps'] == 0:
+                avg_loss = accelerator.gather(loss).mean().item()
+                logger.info(f"Step {step}: loss = {avg_loss:.4f}")
+                wandb.log({
+                    "loss": avg_loss,
+                    "learning_rate": scheduler.get_last_lr()[0],
+                    "step": step,
+                })
 
-        if step % config['training']['prediction_steps'] == 0:
-            sample = generate_sample(model, tokenizer)
-            logger.info(f"\nGenerated sample at step {step}:\n{sample}\n")
-            wandb.log({"generated_text": sample, "step": step})
+            if step % config['training']['prediction_steps'] == 0:
+                sample = generate_sample(model, tokenizer)
+                logger.info(f"\nGenerated sample at step {step}:\n{sample}\n")
+                wandb.log({"generated_text": sample, "step": step})
 
-        if step % config['training']['save_steps'] == 0:
+            if step % config['training']['save_steps'] == 0 or step == total_steps - 1:
+                last_save_successful = save_checkpoint(
+                    accelerator.unwrap_model(model),
+                    optimizer,
+                    scheduler,
+                    step + 1,  # Save with the next step number
+                    loss.item(),
+                    args.save_dir,
+                )
+                if not last_save_successful:
+                    logger.warning("Failed to save checkpoint, but continuing training...")
+
+            step += 1
+
+    except Exception as e:
+        logger.error(f"Training interrupted at step {step}: {str(e)}")
+        # Try to save a final checkpoint if the last save wasn't successful
+        if not last_save_successful:
             save_checkpoint(
                 accelerator.unwrap_model(model),
                 optimizer,
@@ -207,18 +246,18 @@ def train(args):
                 loss.item(),
                 args.save_dir,
             )
+        raise
 
-        step += 1
-
-    # Save final checkpoint
-    save_checkpoint(
-        accelerator.unwrap_model(model),
-        optimizer,
-        scheduler,
-        step,
-        loss.item(),
-        args.save_dir,
-    )
+    # Save final checkpoint if we haven't just saved one
+    if step % config['training']['save_steps'] != 0:
+        save_checkpoint(
+            accelerator.unwrap_model(model),
+            optimizer,
+            scheduler,
+            step,
+            loss.item(),
+            args.save_dir,
+        )
 
     wandb.finish()
 
@@ -232,4 +271,8 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_path", type=str, help="Path to checkpoint to resume from")
     args = parser.parse_args()
 
-    train(args) 
+    try:
+        train(args)
+    except Exception as e:
+        logger.error(f"Training failed: {str(e)}")
+        raise 
