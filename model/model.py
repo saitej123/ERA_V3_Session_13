@@ -242,7 +242,7 @@ class SmolLM2(nn.Module):
         labels: Optional[torch.Tensor] = None,
         past_key_values: Optional[Tuple[torch.Tensor]] = None,
         output_attentions: bool = False,
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         # Ensure input is at least 2D
         if input_ids.dim() == 1:
             input_ids = input_ids.unsqueeze(0)
@@ -273,4 +273,41 @@ class SmolLM2(nn.Module):
         # Get embeddings
         hidden_states = self.embed_tokens(input_ids)
         
-        #
+        # Process through transformer layers
+        for layer in self.layers:
+            hidden_states = layer(
+                hidden_states,
+                attention_mask=causal_mask,
+                past_key_value=past_key_values,
+                output_attentions=output_attentions,
+            )
+        
+        # Final layer norm
+        hidden_states = self.ln_f(hidden_states)
+        
+        # Get logits
+        logits = self.lm_head(hidden_states)
+        
+        loss = None
+        if labels is not None:
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            
+            # Compute loss in fp32 for stability
+            shift_logits = shift_logits.to(torch.float32)
+            
+            # Flatten the tokens
+            loss = F.cross_entropy(
+                shift_logits.view(-1, shift_logits.size(-1)),
+                shift_labels.view(-1),
+                ignore_index=-100,
+            )
+            
+            # Convert back to original dtype
+            loss = loss.to(logits.dtype)
+            
+            return logits, loss
+        
+        return logits, None
+        
