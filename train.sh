@@ -42,7 +42,9 @@ echo "Phase 2: Starting extended training for 50 steps..."
 python continue_training.py \
     --config config.yaml \
     --input_file input.txt \
-    --save_dir checkpoints 2>&1 | tee logs/phase2.log
+    --save_dir checkpoints \
+    --train_steps 50 \
+    --start_step 5000 2>&1 | tee logs/phase2.log
 
 # Check if Phase 2 completed successfully
 if [ $? -ne 0 ]; then

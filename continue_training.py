@@ -1,46 +1,28 @@
 import os
 import torch
 import wandb
-from train import train, parse_args
+import argparse
+
+def parse_continue_args():
+    parser = argparse.ArgumentParser(description='Continue training SmolLM2')
+    parser.add_argument('--config', type=str, required=True, help='Path to config file')
+    parser.add_argument('--input_file', type=str, required=True, help='Path to input text file')
+    parser.add_argument('--save_dir', type=str, required=True, help='Directory to save checkpoints')
+    parser.add_argument('--train_steps', type=int, required=True, help='Number of training steps')
+    parser.add_argument('--start_step', type=int, default=5000, help='Starting step for continued training')
+    return parser.parse_args()
 
 def main():
-    # Parse arguments
-    args = parse_args()
-    
-    # Override some arguments for continued training
-    args.checkpoint_path = "checkpoints/step_5000.pt"
-    args.train_steps = 50  # Train for 50 more steps
-    args.start_step = 5000  # Start from step 5000
-    
-    # Initialize wandb for continued training
-    wandb.init(
-        project="smollm2-training",
-        name="smollm2-continued-training",
-        config=args,
-        resume="allow"
-    )
-    
-    # Load checkpoint and continue training
-    print(f"Loading checkpoint from {args.checkpoint_path}")
-    checkpoint = torch.load(args.checkpoint_path)
-    
-    # Log that we're continuing from step 5000
-    wandb.log({
-        "continued_training_start": True,
-        "starting_step": 5000,
-        "previous_loss": checkpoint["loss"]
-    })
-    
-    # Continue training
-    train(args, checkpoint)
-    
-    # Log completion
-    wandb.log({
-        "continued_training_complete": True,
-        "final_step": 5050
-    })
-    
+    args = parse_continue_args()
+    args.checkpoint_path = os.path.join(args.save_dir, f'step_{args.start_step}.pt')
+    wandb.init(project='smollm2-training', name=f'smollm2-continued-training-{args.start_step}', config=vars(args), resume='allow')
+    print(f'Loading checkpoint from {args.checkpoint_path}')
+    if not os.path.exists(args.checkpoint_path):
+        raise FileNotFoundError(f'Checkpoint not found: {args.checkpoint_path}')
+    from train import train
+    train(args)
+    wandb.log({'continued_training_complete': True, 'final_step': args.start_step + args.train_steps})
     wandb.finish()
 
-if __name__ == "__main__":
-    main() 
+if __name__ == '__main__':
+    main()
