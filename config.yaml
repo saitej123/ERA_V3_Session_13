@@ -29,7 +29,7 @@ training:
   max_grad_norm: 1.0
   
   # Training process parameters
-  batch_size: 12
+  batch_size: 14
   gradient_accumulation_steps: 4
   
   # Training duration parameters
@@ -59,32 +59,48 @@ generation:
 wandb:
   # WandB logging configuration
   project: "smollm2-training"
-  log_model: true              # Log model checkpoints to WandB
-  watch: "gradients"            # Track model gradients and parameters
-  log_batch_metrics: true      # Log metrics every batch
-  log_prediction_samples: true # Log generated text samples
-  log_parameters: true         # Log model parameters
+  entity: null  # Set to your wandb username if needed
+  log_model: true
+  watch: "gradients"
   
-  # Generation logging
-  log_generations: true        # Enable generation logging
-  generation_steps: 500        # Log generations every 500 steps
-  save_generations: true       # Save generations as WandB Table
+  # Logging frequencies
+  log_every: 1  # Log every step
+  save_steps: 500
   
-  # Artifact configuration
-  save_code: true             # Save code snapshot
-  log_checkpoints: true       # Save checkpoints as artifacts
+  # Text generation logging
+  log_generations: true
+  generation_frequency: 500  # Match with prediction_steps
+  log_samples: true
+  samples_to_log: 3
   
-  # Visualization settings
-  plot_learning_rate: true    # Plot learning rate curve
-  plot_grad_flow: true        # Plot gradient flow
-  plot_loss_3d: true         # 3D visualization of loss landscape
+  # Metrics logging
+  log_metrics: [
+    "loss",
+    "learning_rate",
+    "perplexity",
+    "generated_tokens"
+  ]
   
-  # Table configuration
-  generation_table:
+  # Sample logging format
+  sample_logging:
+    log_table: true
+    table_name: "generated_samples"
     columns: [
       "step",
       "prompt",
       "generated_text",
       "generation_time",
       "perplexity"
-    ] 
+    ]
+  
+  # Visualization
+  plots: [
+    "loss_curve",
+    "learning_rate_curve",
+    "grad_flow",
+    "sample_length_distribution"
+  ]
+  
+  # Checkpoint handling
+  save_checkpoints: true
+  checkpoint_frequency: 500 

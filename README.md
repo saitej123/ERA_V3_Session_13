@@ -66,23 +66,25 @@ export CUDA_LAUNCH_BLOCKING=1
 export WANDB_PROJECT="smollm2-training"
 export WANDB_WATCH="gradients"
 export WANDB_LOG_MODEL="true"
+export WANDB_SILENT="false"
+export WANDB_CONSOLE="wrap"
+export WANDB_DISABLE_CODE="false"
 ```
 
 ### Training Configuration
 - **Phase 1**: Initial Training
   - Steps: 5000
-  - Evaluation Frequency: Every 100 steps
-  - Checkpoint Saving: Every 500 steps
-  - Text Generation: Every 200 steps
-  - Mixed Precision: BF16
+  - Batch Size: 14 (optimized for performance)
   - Gradient Accumulation Steps: 4
+  - Evaluation Frequency: Every 100 steps
+  - Checkpoint & Generation: Every 500 steps
+  - Mixed Precision: BF16
 
 - **Phase 2**: Continuous Training
   - Steps: 50 (5000-5050)
-  - Loads checkpoint from step 5000
   - Maintains all hyperparameters
-  - Continues WandB logging
-  - Preserves optimizer state
+  - Loads checkpoint from step 5000
+  - Continuous WandB logging
 
 ### Quick Start
 ```bash
@@ -95,24 +97,35 @@ chmod +x train.sh
 
 ### Training Strategy
 1. **Initial Training Phase (0-5000 steps)**
-   - Mixed precision training (BF16)
-   - Flash Attention for efficient computation
-   - Regular evaluation and checkpointing
-   - Progress tracking in WandB
-   - Automatic checkpoint at step 5000
+   ```bash
+   python train.py \
+       --config config.yaml \
+       --input_file input.txt \
+       --save_dir checkpoints \
+       --train_steps 5000
+   ```
+   - Mixed precision (BF16)
+   - Flash Attention enabled
+   - Regular checkpointing
+   - WandB logging with samples
 
 2. **Extended Training Phase (5000-5050 steps)**
-   - Seamless checkpoint loading
-   - Continuous training without parameter reset
-   - Maintained optimization state
-   - Uninterrupted WandB logging
-   - Final checkpoint at step 5050
+   ```bash
+   python continue_training.py \
+       --config config.yaml \
+       --input_file input.txt \
+       --save_dir checkpoints
+   ```
+   - Seamless continuation
+   - State preservation
+   - Continuous logging
 
 ### Optimization Parameters
 - AdamW optimizer
 - Learning rate: 5e-4
 - Weight decay: 0.1
 - Gradient clipping: 1.0
+- Batch size: 14
 - Gradient accumulation steps: 4
 
 ### Generation Settings
@@ -120,35 +133,51 @@ chmod +x train.sh
 - Top-k: 50
 - Top-p: 0.95
 - Max length: 100
-
-## Performance Features
-
-1. **Memory Efficiency**
-   - Flash Attention for O(n) memory complexity
-   - Gradient checkpointing for reduced memory usage
-   - Mixed precision training for memory optimization
-
-2. **Training Speed**
-   - Optimized CUDA operations
-   - Efficient data loading and processing
-   - Parallel computation with multiple GPUs
-   - Environment-level optimizations
-
-3. **Generation Quality**
-   - Top-k and nucleus sampling
-   - Temperature control for diversity
-   - EOS token handling for proper completion
+- Number of samples: 3
+- Prompt templates:
+  ```python
+  [
+    "Once upon a time",
+    "In a world where",
+    "The most interesting thing about"
+  ]
+  ```
 
 ## Monitoring and Logging
-- **WandB Integration**:
-  - Loss tracking
-  - Learning rate scheduling
-  - Generated text samples
-  - Resource utilization
-  - Training progress
-  - Gradient flow visualization
-  - Model checkpoints
-  - Continuous run tracking
+
+### WandB Integration
+1. **Metrics Tracking**:
+   - Loss
+   - Learning rate
+   - Perplexity
+   - Generated tokens
+
+2. **Sample Logging**:
+   - Generation frequency: Every 500 steps
+   - Samples per generation: 3
+   - Tracked metrics:
+     - Generation time
+     - Perplexity
+     - Sample length
+
+3. **Visualizations**:
+   - Loss curve
+   - Learning rate curve
+   - Gradient flow
+   - Sample length distribution
+
+4. **Artifacts**:
+   - Model checkpoints
+   - Generated samples table
+   - Training logs
+   - Code snapshots
+
+### Local Logging
+- Detailed logs in `logs/` directory
+  - Phase 1: `logs/phase1.log`
+  - Phase 2: `logs/phase2.log`
+- Checkpoints in `checkpoints/` directory
+- Automatic log rotation and management
 
 ## Error Handling
 - Phase completion verification
