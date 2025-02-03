@@ -191,8 +191,11 @@ def generate_sample(model: nn.Module, tokenizer, prompt: str = "Once upon a time
 
 
 def train(args):
-    # Initialize wandb
-    wandb.init(project="smollm2-training", config=args)
+    # Initialize wandb (optional)
+    if os.environ.get("WANDB_DISABLED", "").lower() != "true":
+        wandb.init(project="smollm2-training", config=args)
+    else:
+        logger.info("WandB logging is disabled")
 
     try:
         # Load configuration
@@ -200,12 +203,13 @@ def train(args):
         
         # Set default device
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.info(f"Using device: {device}")
         
         # Initialize accelerator with the right settings
         accelerator = Accelerator(
             mixed_precision='no',  # Temporarily disable mixed precision for debugging
             gradient_accumulation_steps=config['training']['gradient_accumulation_steps'],
-            log_with="wandb",
+            log_with="wandb" if os.environ.get("WANDB_DISABLED", "").lower() != "true" else None,
             device_placement=True,
         )
 
@@ -222,7 +226,7 @@ def train(args):
         )
 
         # Initialize model, optimizer, and scheduler
-        model = SmolLM2(model_config)
+        model = SmolLM2(SmolLM2Config(**config['model']))
         
         # Move model to device before creating optimizer
         model = model.to(device)  # Explicitly move model to device
@@ -299,18 +303,20 @@ def train(args):
                 avg_loss = accelerator.gather(loss).mean().item()
                 avg_loss *= config['training']['gradient_accumulation_steps']  # Rescale loss
                 logger.info(f"Step {step}: loss = {avg_loss:.4f}")
-                wandb.log({
-                    "loss": avg_loss,
-                    "learning_rate": scheduler.get_last_lr()[0],
-                    "step": step,
-                })
+                if os.environ.get("WANDB_DISABLED", "").lower() != "true":
+                    wandb.log({
+                        "loss": avg_loss,
+                        "learning_rate": scheduler.get_last_lr()[0],
+                        "step": step,
+                    })
 
             if step % config['training']['prediction_steps'] == 0:
                 model.eval()  # Set to eval mode for generation
                 sample = generate_sample(model, tokenizer)
                 model.train()  # Set back to training mode
                 logger.info(f"\nGenerated sample at step {step}:\n{sample}\n")
-                wandb.log({"generated_text": sample, "step": step})
+                if os.environ.get("WANDB_DISABLED", "").lower() != "true":
+                    wandb.log({"generated_text": sample, "step": step})
 
             if step % config['training']['save_steps'] == 0 or step == total_steps - 1:
                 # Unwrap and save model
@@ -345,8 +351,9 @@ def train(args):
         raise
 
     finally:
+        if os.environ.get("WANDB_DISABLED", "").lower() != "true":
+            wandb.finish()
         accelerator.end_training()
-        wandb.finish()
 
 
 if __name__ == "__main__":
@@ -356,7 +363,12 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", type=str, required=True, help="Directory to save checkpoints")
     parser.add_argument("--train_steps", type=int, required=True, help="Number of training steps")
     parser.add_argument("--checkpoint_path", type=str, help="Path to checkpoint to resume from")
+    parser.add_argument("--disable_wandb", action="store_true", help="Disable WandB logging")
     args = parser.parse_args()
+
+    # Set WandB disabled environment variable if specified
+    if args.disable_wandb:
+        os.environ["WANDB_DISABLED"] = "true"
 
     try:
         train(args)

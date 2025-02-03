@@ -1,0 +1,61 @@
+model:
+  # Model architecture parameters
+  hidden_dim: 768
+  n_layers: 12
+  n_heads: 12
+  intermediate_size: 3072
+  max_position_embeddings: 2048
+  vocab_size: 32000
+  
+  # Regularization parameters
+  dropout: 0.1
+  attention_dropout: 0.1
+  
+  # Numerical stability parameters
+  layer_norm_epsilon: 1.0e-5
+  initializer_range: 0.02
+  
+  # Model features
+  use_cache: true
+  use_flash_attention: true
+  use_rotary_embeddings: true
+  gradient_checkpointing: true
+
+training:
+  # Optimization parameters
+  learning_rate: 1.0e-4
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  
+  # Training process parameters
+  batch_size: 12
+  gradient_accumulation_steps: 4
+  
+  # Mixed precision settings
+  bf16: false  # Disabled for debugging
+  
+  # Logging and saving frequencies
+  eval_steps: 100
+  save_steps: 500
+  prediction_steps: 200
+  
+  # Training duration parameters
+  max_steps: 5000
+  warmup_steps: 100
+
+wandb:
+  # WandB logging configuration
+  log_model: true              # Log model checkpoints to WandB
+  watch_model: true            # Track model gradients and parameters
+  log_batch_metrics: true      # Log metrics every batch
+  log_prediction_samples: true # Log generated text samples
+  log_parameters: true         # Log model parameters
+  
+  # Artifact configuration
+  save_code: true             # Save code snapshot
+  log_checkpoints: true       # Save checkpoints as artifacts
+  
+  # Visualization settings
+  plot_learning_rate: true    # Plot learning rate curve
+  plot_grad_flow: true        # Plot gradient flow
+  plot_loss_3d: true         # 3D visualization of loss landscape 

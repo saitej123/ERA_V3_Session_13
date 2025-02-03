@@ -1,109 +1,127 @@
-# SmolLM2-135 Implementation and Training
+# SmolLM2 Training
 
-This repository contains an implementation and training pipeline for SmolLM2-135, a lightweight language model. The model is trained for 5000 steps with intermediate predictions every 500 steps, followed by an additional 50 steps of training from a checkpoint.
+This repository contains the code and configuration for training the SmolLM2 language model.
 
-## Model Architecture
-
-SmolLM2-135 is a transformer-based language model with the following specifications:
-
-- **Total Parameters**: 135M parameters
-- **Architecture**:
-  - 12 transformer layers
-  - 768 hidden dimension
-  - 12 attention heads
-  - 3072 intermediate size (FFN)
-  - Layer normalization before attention and FFN (Pre-LN architecture)
-  - Rotary positional embeddings
-  - Vocabulary size: 32000 (using BPE tokenization)
-
-### Parameter Calculation
-
-Total parameters breakdown:
-1. Token Embeddings: 768 * 32000 = 24.576M
-2. Layer parameters (per layer):
-   - Self-attention:
-     - Q,K,V matrices: 3 * (768 * 768) = 1.769M
-     - Output projection: 768 * 768 = 0.589M
-   - FFN:
-     - First projection: 768 * 3072 = 2.359M
-     - Second projection: 3072 * 768 = 2.359M
-   - Layer norms: 2 * 768 * 2 = 0.003M
-   Total per layer: ~7.079M
-
-Total parameters: 24.576M + (7.079M * 12) = ~135M parameters
-
-## Project Structure
-
-```
-.
-├── README.md
-├── config
-│   └── model_config.yaml
-├── model
-│   ├── model.py
-│   └── utils.py
-├── train.py
-├── requirements.txt
-└── input.txt
-```
-
-## Training Process
-
-The training process consists of two phases:
-
-1. **Initial Training (5000 steps)**:
-   - Training with gradient checkpointing for memory efficiency
-   - Flash Attention 2 for faster attention computation
-   - Predictions generated every 500 steps
-   - Checkpoint saved at step 5000
-
-2. **Additional Training (50 steps)**:
-   - Load checkpoint from step 5000
-   - Continue training for 50 more steps
-   - Final model saved and uploaded to Hugging Face Spaces
-
-## Training Optimizations
-
-The following optimizations are implemented for efficient training:
-
-1. Gradient Checkpointing
-2. Flash Attention 2
-3. Mixed Precision Training (bfloat16)
-4. Efficient Memory Management
-5. Optimized DataLoader with prefetching
-
-## Results
-
-Training logs and intermediate predictions can be found in the model's Hugging Face Space:
-[Link to be added after training]
-
-## Model Links
-
-- GitHub Repository: [Current Repository]
-- Hugging Face Space: [To be added after training]
-
-## Requirements
-
-See `requirements.txt` for all dependencies. Key requirements:
-- PyTorch >= 2.0
-- Transformers
-- Flash Attention 2
-- Accelerate
-- Wandb (for logging)
-
-## Usage
+## Setup
 
 1. Install dependencies:
 ```bash
-pip install -r requirements.txt
+pip install torch transformers accelerate wandb pyyaml
 ```
 
-2. Initial training:
+2. Set up WandB:
 ```bash
-python train.py --config config/model_config.yaml --train_steps 5000
+wandb login
 ```
 
-3. Continue training from checkpoint:
+3. Prepare your training data:
+- Place your training text in `input.txt`
+- The text should be raw text format
+- The model will automatically handle tokenization
+
+4. Configure the model:
+- Edit `config.yaml` to adjust model and training parameters
+- The configuration is split into three main sections:
+  - `model`: Architecture and model parameters
+  - `training`: Training process parameters
+  - `wandb`: Logging and visualization settings
+
+## Training
+
+1. Start training:
 ```bash
-python train.py --config config/model_config.yaml --train_steps 50 --checkpoint_path checkpoints/step_5000.pt
-``` 
+./run_training.sh
+```
+
+2. Resume from checkpoint:
+```bash
+python train.py \
+    --config config.yaml \
+    --input_file input.txt \
+    --save_dir checkpoints \
+    --train_steps 5000 \
+    --checkpoint_path checkpoints/step_XXXX.pt
+```
+
+## Configuration
+
+### Model Parameters
+- `hidden_dim`: Size of hidden layers (768)
+- `n_layers`: Number of transformer layers (12)
+- `n_heads`: Number of attention heads (12)
+- `intermediate_size`: Size of feedforward layers (3072)
+- `max_position_embeddings`: Maximum sequence length (2048)
+- `vocab_size`: Size of vocabulary (32000)
+
+### Training Parameters
+- `learning_rate`: Learning rate (1e-4)
+- `weight_decay`: Weight decay for AdamW (0.01)
+- `batch_size`: Batch size per GPU (12)
+- `gradient_accumulation_steps`: Steps before optimizer update (4)
+- `eval_steps`: Steps between evaluations (100)
+- `save_steps`: Steps between checkpoints (500)
+
+### WandB Configuration
+- Logging Options:
+  - Model checkpoints
+  - Gradients and parameters
+  - Batch metrics
+  - Generated text samples
+  - Model parameters
+- Artifacts:
+  - Code snapshots
+  - Checkpoints
+- Visualizations:
+  - Learning rate curves
+  - Gradient flow
+  - 3D loss landscape
+
+## Monitoring Training
+
+1. Real-time Monitoring:
+- Open your WandB dashboard to view:
+  - Training loss
+  - Learning rate
+  - Generated samples
+  - Model gradients
+  - System metrics
+
+2. Visualizations:
+- Learning curves
+- Gradient flow charts
+- Loss landscape analysis
+- Parameter distributions
+
+## Checkpoints
+
+Checkpoints are saved in the `checkpoints` directory with the format:
+```
+checkpoints/step_XXXX.pt
+```
+
+Each checkpoint contains:
+- Model state
+- Optimizer state
+- Scheduler state
+- Training step
+- Last loss value
+
+All checkpoints are automatically logged to WandB as artifacts.
+
+## Logs
+
+Training logs are tracked in WandB and include:
+- Loss values
+- Learning rates
+- Generated samples
+- Error messages (if any)
+- System metrics (GPU usage, memory, etc.)
+- Model gradients and parameters
+
+## Notes
+
+- The training script uses gradient checkpointing to reduce memory usage
+- Mixed precision training is temporarily disabled for debugging
+- The model uses layer normalization for stability
+- Attention masks are properly handled for causal language modeling
+- All training metrics and artifacts are logged to WandB for analysis 
