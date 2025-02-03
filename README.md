@@ -80,10 +80,10 @@ export WANDB_DISABLE_CODE="false"
   - Checkpoint & Generation: Every 500 steps
   - Mixed Precision: BF16
 
-- **Phase 2**: Continuous Training
-  - Steps: 50 (5000-5050)
+- **Phase 2**: Continued Training
+  - Starts from step 5001
   - Maintains all hyperparameters
-  - Loads checkpoint from step 5000
+  - Loads checkpoint from step 5001
   - Continuous WandB logging
 
 ### Quick Start
@@ -109,15 +109,16 @@ chmod +x train.sh
    - Regular checkpointing
    - WandB logging with samples
 
-2. **Extended Training Phase (5000-5050 steps)**
+2. **Continued Training Phase (starting from 5001)**
    ```bash
    python continue_training.py \
        --config config.yaml \
        --input_file input.txt \
-       --save_dir checkpoints
+       --save_dir checkpoints \
+       --train_steps <desired_steps>
    ```
-   - Seamless continuation
-   - State preservation
+   - Continues from step 5001
+   - Maintains all hyperparameters
    - Continuous logging
 
 ### Optimization Parameters
