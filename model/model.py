@@ -36,7 +36,9 @@ class LayerNorm(nn.Module):
         self.eps = eps
 
     def forward(self, x):
-        return F.layer_norm(x, x.shape[-1:], self.weight, self.bias, self.eps)
+        mean = x.mean(-1, keepdim=True)
+        var = x.var(-1, unbiased=False, keepdim=True)
+        return (x - mean) * torch.rsqrt(var + self.eps) * self.weight + self.bias
 
 
 class MLP(nn.Module):
@@ -185,21 +187,36 @@ class SmolLM2(nn.Module):
         past_key_values: Optional[Tuple[torch.Tensor]] = None,
         output_attentions: bool = False,
     ) -> torch.Tensor:
+        # Ensure input is at least 2D
+        if input_ids.dim() == 1:
+            input_ids = input_ids.unsqueeze(0)
+        
+        # Create causal attention mask
+        seq_length = input_ids.size(-1)
+        causal_mask = torch.triu(torch.ones((seq_length, seq_length), dtype=torch.bool, device=input_ids.device), diagonal=1)
+        causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)  # [1, 1, seq_len, seq_len]
+        
+        # Get embeddings
         hidden_states = self.embed_tokens(input_ids)
 
+        # Process through transformer layers
         for layer in self.layers:
             if self.config.gradient_checkpointing and self.training:
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        return module(*inputs)
+                    return custom_forward
+
                 layer_outputs = torch.utils.checkpoint.checkpoint(
-                    layer,
+                    create_custom_forward(layer),
                     hidden_states,
-                    attention_mask,
-                    None,
-                    output_attentions,
+                    causal_mask,
+                    use_reentrant=False
                 )
             else:
                 layer_outputs = layer(
                     hidden_states,
-                    attention_mask=attention_mask,
+                    attention_mask=causal_mask,
                     past_key_value=None,
                     output_attentions=output_attentions,
                 )
@@ -210,9 +227,20 @@ class SmolLM2(nn.Module):
 
         loss = None
         if labels is not None:
+            # Shift so that tokens < n predict n
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
-            loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            
+            # Flatten the tokens
+            loss_fct = nn.CrossEntropyLoss()
+            shift_logits = shift_logits.view(-1, shift_logits.size(-1))
+            shift_labels = shift_labels.view(-1)
+            
+            # Enable loss computation in fp32
+            if shift_logits.dtype != torch.float32:
+                shift_logits = shift_logits.float()
+            
+            loss = loss_fct(shift_logits, shift_labels)
 
         return logits, loss
 

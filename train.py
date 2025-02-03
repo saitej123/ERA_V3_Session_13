@@ -18,6 +18,11 @@ import wandb
 
 from model.model import SmolLM2, SmolLM2Config
 
+# Set environment variables
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -28,14 +33,39 @@ class TextDataset(Dataset):
             text = f.read()
 
         logger.info(f"Tokenizing text from {file_path}")
-        self.examples = tokenizer(
-            text,
-            truncation=True,
-            max_length=block_size,
-            return_tensors="pt",
-            return_overflowing_tokens=True,
-            padding="max_length",
-        )["input_ids"]
+        
+        # Process text in chunks to avoid memory issues
+        chunk_size = 1000000  # Process 1M characters at a time
+        chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+        
+        all_input_ids = []
+        for chunk in chunks:
+            # Tokenize without padding first
+            tokens = tokenizer(
+                chunk,
+                truncation=False,
+                add_special_tokens=True,
+                return_tensors=None,  # Return python list
+            )["input_ids"]
+            
+            # Concatenate all tokens
+            if isinstance(tokens[0], list):
+                tokens = [t for sublist in tokens for t in sublist]
+            else:
+                tokens = list(tokens)
+        
+            all_input_ids.extend(tokens)
+        
+        # Create chunks of block_size
+        n = len(all_input_ids)
+        self.examples = []
+        for i in range(0, n - block_size + 1, block_size):
+            chunk = all_input_ids[i:i + block_size]
+            if len(chunk) == block_size:  # Only keep full-length chunks
+                self.examples.append(torch.tensor(chunk, dtype=torch.long))
+        
+        self.examples = torch.stack(self.examples)
+        logger.info(f"Created dataset with {len(self.examples)} examples of length {block_size}")
 
     def __len__(self):
         return len(self.examples)
@@ -48,7 +78,7 @@ def create_dataloader(
     dataset: Dataset,
     batch_size: int,
     shuffle: bool = True,
-    num_workers: int = 4,
+    num_workers: int = 0,  # Reduced number of workers
 ) -> DataLoader:
     return DataLoader(
         dataset,
@@ -162,62 +192,78 @@ def train(args):
     # Initialize wandb
     wandb.init(project="smollm2-training", config=args)
 
-    # Load configuration
-    config = load_config(args.config)
-    
-    # Filter out any config keys that aren't in SmolLM2Config
-    valid_config_keys = {f.name for f in fields(SmolLM2Config)}
-    model_config_dict = {k: v for k, v in config['model'].items() if k in valid_config_keys}
-    model_config = SmolLM2Config(**model_config_dict)
-
-    # Initialize accelerator
-    accelerator = Accelerator(
-        mixed_precision='bf16' if config['training']['bf16'] else 'fp16',
-        gradient_accumulation_steps=config['training']['gradient_accumulation_steps'],
-    )
-
-    # Initialize tokenizer
-    tokenizer = AutoTokenizer.from_pretrained('gpt2')
-    tokenizer.pad_token = tokenizer.eos_token
-
-    # Create dataset and dataloader
-    dataset = TextDataset(args.input_file, tokenizer)
-    dataloader = create_dataloader(dataset, config['training']['batch_size'])
-
-    # Initialize model, optimizer, and scheduler
-    model = SmolLM2(model_config)
-    optimizer = AdamW(
-        model.parameters(),
-        lr=config['training']['learning_rate'],
-        weight_decay=config['training']['weight_decay'],
-    )
-    scheduler = CosineAnnealingLR(
-        optimizer,
-        T_max=args.train_steps,
-        eta_min=1e-5,
-    )
-
-    # Load checkpoint if specified
-    start_step = 0
-    if args.checkpoint_path:
-        if not os.path.exists(args.checkpoint_path):
-            raise FileNotFoundError(f"Checkpoint not found: {args.checkpoint_path}")
-        start_step, _ = load_checkpoint(args.checkpoint_path, model, optimizer, scheduler)
-        logger.info(f"Loaded checkpoint from step {start_step}")
-
-    # Prepare for distributed training
-    model, optimizer, dataloader, scheduler = accelerator.prepare(
-        model, optimizer, dataloader, scheduler
-    )
-
-    # Training loop
-    model.train()
-    data_iter = iter(dataloader)
-    total_steps = start_step + args.train_steps
-    step = start_step
-    last_save_successful = True
-
     try:
+        # Load configuration
+        config = load_config(args.config)
+        
+        # Filter out any config keys that aren't in SmolLM2Config
+        valid_config_keys = {f.name for f in fields(SmolLM2Config)}
+        model_config_dict = {k: v for k, v in config['model'].items() if k in valid_config_keys}
+        model_config = SmolLM2Config(**model_config_dict)
+
+        # Initialize accelerator with the right settings
+        accelerator = Accelerator(
+            mixed_precision='bf16' if config['training']['bf16'] else 'fp16',
+            gradient_accumulation_steps=config['training']['gradient_accumulation_steps'],
+            log_with="wandb",
+            device_placement=True,
+        )
+
+        # Initialize tokenizer
+        tokenizer = AutoTokenizer.from_pretrained('gpt2')
+        tokenizer.pad_token = tokenizer.eos_token
+
+        # Create dataset and dataloader
+        dataset = TextDataset(args.input_file, tokenizer)
+        dataloader = create_dataloader(
+            dataset, 
+            config['training']['batch_size'],
+            num_workers=0  # Disable multiprocessing for tokenizer
+        )
+
+        # Initialize model, optimizer, and scheduler
+        model = SmolLM2(model_config)
+        
+        # Move model to device before creating optimizer
+        model = accelerator.prepare_model(model)
+        
+        optimizer = AdamW(
+            model.parameters(),
+            lr=float(config['training']['learning_rate']),
+            weight_decay=float(config['training']['weight_decay']),
+            eps=1e-8,  # Added for stability
+            betas=(0.9, 0.999),  # Added explicit betas
+        )
+        scheduler = CosineAnnealingLR(
+            optimizer,
+            T_max=args.train_steps,
+            eta_min=1e-5,
+        )
+
+        # Load checkpoint if specified
+        start_step = 0
+        if args.checkpoint_path:
+            if not os.path.exists(args.checkpoint_path):
+                raise FileNotFoundError(f"Checkpoint not found: {args.checkpoint_path}")
+            start_step, _ = load_checkpoint(args.checkpoint_path, model, optimizer, scheduler)
+            logger.info(f"Loaded checkpoint from step {start_step}")
+
+        # Prepare for distributed training
+        optimizer, dataloader, scheduler = accelerator.prepare(
+            optimizer, dataloader, scheduler
+        )
+
+        # Training loop
+        model.train()
+        data_iter = iter(dataloader)
+        total_steps = start_step + args.train_steps
+        step = start_step
+        last_save_successful = True
+
+        # Enable tensor cores for better performance
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
         while step < total_steps:
             try:
                 batch = next(data_iter)
@@ -225,19 +271,32 @@ def train(args):
                 data_iter = iter(dataloader)
                 batch = next(data_iter)
 
+            # Move batch to device and ensure it's contiguous
+            batch = batch.to(model.device, non_blocking=True).contiguous()
+
             with accelerator.accumulate(model):
+                # Forward pass with gradient checkpointing
                 outputs, loss = model(batch, labels=batch)
+                
+                # Scale loss for gradient accumulation
+                loss = loss / config['training']['gradient_accumulation_steps']
+                
+                # Backward pass
                 accelerator.backward(loss)
                 
                 if accelerator.sync_gradients:
+                    # Clip gradients
                     accelerator.clip_grad_norm_(model.parameters(), config['training']['max_grad_norm'])
-                
-                optimizer.step()
-                scheduler.step()
-                optimizer.zero_grad()
+                    
+                    # Step optimizer and scheduler
+                    optimizer.step()
+                    scheduler.step()
+                    optimizer.zero_grad(set_to_none=True)  # More efficient than zero_grad()
 
             if step % config['training']['eval_steps'] == 0:
+                # Gather loss from all processes
                 avg_loss = accelerator.gather(loss).mean().item()
+                avg_loss *= config['training']['gradient_accumulation_steps']  # Rescale loss
                 logger.info(f"Step {step}: loss = {avg_loss:.4f}")
                 wandb.log({
                     "loss": avg_loss,
@@ -246,17 +305,21 @@ def train(args):
                 })
 
             if step % config['training']['prediction_steps'] == 0:
+                model.eval()  # Set to eval mode for generation
                 sample = generate_sample(model, tokenizer)
+                model.train()  # Set back to training mode
                 logger.info(f"\nGenerated sample at step {step}:\n{sample}\n")
                 wandb.log({"generated_text": sample, "step": step})
 
             if step % config['training']['save_steps'] == 0 or step == total_steps - 1:
+                # Unwrap and save model
+                unwrapped_model = accelerator.unwrap_model(model)
                 last_save_successful = save_checkpoint(
-                    accelerator.unwrap_model(model),
+                    unwrapped_model,
                     optimizer,
                     scheduler,
                     step + 1,  # Save with the next step number
-                    loss.item(),
+                    loss.item() * config['training']['gradient_accumulation_steps'],  # Save unscaled loss
                     args.save_dir,
                 )
                 if not last_save_successful:
@@ -266,30 +329,23 @@ def train(args):
 
     except Exception as e:
         logger.error(f"Training interrupted at step {step}: {str(e)}")
-        # Try to save a final checkpoint if the last save wasn't successful
-        if not last_save_successful:
-            save_checkpoint(
-                accelerator.unwrap_model(model),
-                optimizer,
-                scheduler,
-                step,
-                loss.item(),
-                args.save_dir,
-            )
+        if 'last_save_successful' in locals() and not last_save_successful:
+            try:
+                save_checkpoint(
+                    accelerator.unwrap_model(model),
+                    optimizer,
+                    scheduler,
+                    step,
+                    loss.item() * config['training']['gradient_accumulation_steps'],
+                    args.save_dir,
+                )
+            except Exception as save_error:
+                logger.error(f"Failed to save final checkpoint: {str(save_error)}")
         raise
 
-    # Save final checkpoint if we haven't just saved one
-    if step % config['training']['save_steps'] != 0:
-        save_checkpoint(
-            accelerator.unwrap_model(model),
-            optimizer,
-            scheduler,
-            step,
-            loss.item(),
-            args.save_dir,
-        )
-
-    wandb.finish()
+    finally:
+        accelerator.end_training()
+        wandb.finish()
 
 
 if __name__ == "__main__":
