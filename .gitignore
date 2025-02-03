@@ -1,2 +1,5 @@
 docker_setup/model_server/model/step_5051.pt
 model/__pycache__/model.cpython-310.pyc
+docker_setup/=
+.gitignore
+docker_setup/transferring
