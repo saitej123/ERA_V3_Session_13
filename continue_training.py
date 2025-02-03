@@ -26,8 +26,23 @@ def main():
     
     print(f"Loading checkpoint from {args.checkpoint_path}")
     
-    # Continue training without reinitializing wandb
+    # Initialize wandb for continued training
+    wandb.init(
+        project="smollm2-training",
+        name=f"continued_training_from_step_{args.start_step}",
+        resume="allow",
+        config={
+            "start_step": args.start_step,
+            "train_steps": args.train_steps,
+            "phase": "continued_training"
+        }
+    )
+    
+    # Continue training
     train(args)
+    
+    # Close wandb run
+    wandb.finish()
 
 if __name__ == "__main__":
     main() 
