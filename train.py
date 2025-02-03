@@ -60,8 +60,38 @@ def create_dataloader(
 
 
 def load_config(config_path: str) -> dict:
+    """Load and validate configuration from YAML file."""
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
+    
+    # Ensure training parameters are of correct type
+    training_config = config.get('training', {})
+    training_config['learning_rate'] = float(training_config.get('learning_rate', 1e-4))
+    training_config['weight_decay'] = float(training_config.get('weight_decay', 0.01))
+    training_config['max_grad_norm'] = float(training_config.get('max_grad_norm', 1.0))
+    training_config['batch_size'] = int(training_config.get('batch_size', 32))
+    training_config['gradient_accumulation_steps'] = int(training_config.get('gradient_accumulation_steps', 4))
+    training_config['eval_steps'] = int(training_config.get('eval_steps', 500))
+    training_config['save_steps'] = int(training_config.get('save_steps', 500))
+    training_config['prediction_steps'] = int(training_config.get('prediction_steps', 500))
+    training_config['max_steps'] = int(training_config.get('max_steps', 5000))
+    training_config['warmup_steps'] = int(training_config.get('warmup_steps', 100))
+    
+    # Ensure model parameters are of correct type
+    model_config = config.get('model', {})
+    model_config['hidden_dim'] = int(model_config.get('hidden_dim', 768))
+    model_config['n_layers'] = int(model_config.get('n_layers', 12))
+    model_config['n_heads'] = int(model_config.get('n_heads', 12))
+    model_config['intermediate_size'] = int(model_config.get('intermediate_size', 3072))
+    model_config['max_position_embeddings'] = int(model_config.get('max_position_embeddings', 2048))
+    model_config['vocab_size'] = int(model_config.get('vocab_size', 32000))
+    model_config['dropout'] = float(model_config.get('dropout', 0.1))
+    model_config['attention_dropout'] = float(model_config.get('attention_dropout', 0.1))
+    model_config['layer_norm_epsilon'] = float(model_config.get('layer_norm_epsilon', 1e-5))
+    model_config['initializer_range'] = float(model_config.get('initializer_range', 0.02))
+    
+    config['training'] = training_config
+    config['model'] = model_config
     return config
 
 
