@@ -29,7 +29,7 @@ training:
   max_grad_norm: 1.0
   
   # Training process parameters
-  batch_size: 32
+  batch_size: 48
   gradient_accumulation_steps: 4
   
   # Training duration parameters

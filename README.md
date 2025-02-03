@@ -74,9 +74,9 @@ export WANDB_DISABLE_CODE="false"
 ### Training Configuration
 - **Phase 1**: Initial Training
   - Steps: 5000
-  - Batch Size: 14 (optimized for performance)
+  - Batch Size: 48 (optimized for balanced throughput and memory usage)
   - Gradient Accumulation Steps: 4
-  - Evaluation Frequency: Every 100 steps
+  - Evaluation & Logging: Every 500 steps
   - Checkpoint & Generation: Every 500 steps
   - Mixed Precision: BF16
 
@@ -125,7 +125,7 @@ chmod +x train.sh
 - Learning rate: 5e-4
 - Weight decay: 0.1
 - Gradient clipping: 1.0
-- Batch size: 14
+- Batch size: 48
 - Gradient accumulation steps: 4
 
 ### Generation Settings
