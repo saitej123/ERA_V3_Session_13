@@ -27,7 +27,8 @@ def init_model(checkpoint_path: str, config_path: str):
     if torch.cuda.is_available():
         model = model.cuda()
     
-    tokenizer = AutoTokenizer.from_pretrained(config['tokenizer'])
+    # Use GPT-2 tokenizer since the model uses the same vocabulary
+    tokenizer = AutoTokenizer.from_pretrained('gpt2')
     return model, tokenizer
 
 def generate_text(prompt: str, max_length: int = 100, temperature: float = 0.8, model=None, tokenizer=None):
