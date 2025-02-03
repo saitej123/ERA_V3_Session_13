@@ -34,11 +34,24 @@ class LayerNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones(dim))
         self.bias = nn.Parameter(torch.zeros(dim))
         self.eps = eps
+        self.dim = dim
 
     def forward(self, x):
-        mean = x.mean(-1, keepdim=True)
-        var = x.var(-1, unbiased=False, keepdim=True)
-        return (x - mean) * torch.rsqrt(var + self.eps) * self.weight + self.bias
+        if x.dim() == 2:
+            x = x.unsqueeze(0)  # Add batch dimension if missing
+        
+        if x.size(-1) != self.dim:
+            raise ValueError(f"Expected last dimension to be {self.dim}, got {x.size(-1)}")
+            
+        # Compute statistics along last dimension only
+        mean = x.mean(dim=-1, keepdim=True)
+        var = x.var(dim=-1, keepdim=True, unbiased=False)
+        
+        # Normalize and scale
+        x = (x - mean) * torch.rsqrt(var + self.eps)
+        x = x * self.weight + self.bias
+        
+        return x.type_as(self.weight)  # Ensure output dtype matches weights
 
 
 class MLP(nn.Module):
@@ -125,11 +138,11 @@ class MultiHeadAttention(nn.Module):
 class TransformerBlock(nn.Module):
     def __init__(self, config: SmolLM2Config):
         super().__init__()
-        self.ln1 = LayerNorm(config.hidden_dim, config.layer_norm_epsilon)
-        self.ln2 = LayerNorm(config.hidden_dim, config.layer_norm_epsilon)
+        self.ln1 = LayerNorm(config.hidden_dim, eps=config.layer_norm_epsilon)
+        self.ln2 = LayerNorm(config.hidden_dim, eps=config.layer_norm_epsilon)
         self.attn = MultiHeadAttention(config)
         self.mlp = MLP(config)
-        self.dropout = nn.Dropout(config.dropout)
+        self.config = config
 
     def forward(
         self,
@@ -137,21 +150,30 @@ class TransformerBlock(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
         output_attentions: bool = False,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+    ) -> torch.Tensor:
+        # Shape checks
+        batch_size, seq_length, hidden_dim = hidden_states.size()
+        if hidden_dim != self.config.hidden_dim:
+            raise ValueError(f"Expected hidden_dim {self.config.hidden_dim}, got {hidden_dim}")
+            
+        # First Layer Norm
         residual = hidden_states
         hidden_states = self.ln1(hidden_states)
-        attn_output = self.attn(
+        
+        # Self Attention
+        attn_outputs = self.attn(
             hidden_states,
             attention_mask=attention_mask,
             past_key_value=past_key_value,
             output_attentions=output_attentions,
         )
-        hidden_states = residual + self.dropout(attn_output)
-
+        hidden_states = attn_outputs + residual
+        
+        # Second Layer Norm and MLP
         residual = hidden_states
         hidden_states = self.ln2(hidden_states)
-        hidden_states = residual + self.dropout(self.mlp(hidden_states))
-
+        hidden_states = self.mlp(hidden_states) + residual
+        
         return hidden_states
 
 
@@ -211,22 +233,28 @@ class SmolLM2(nn.Module):
         causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)  # [1, 1, seq_len, seq_len]
         
         # Get embeddings
-        hidden_states = self.embed_tokens(input_ids)
-
+        hidden_states = self.embed_tokens(input_ids)  # [batch_size, seq_len, hidden_dim]
+        
         # Process through transformer layers
-        for layer in self.layers:
+        for i, layer in enumerate(self.layers):
             if self.config.gradient_checkpointing and self.training:
                 def create_custom_forward(module):
                     def custom_forward(*inputs):
                         return module(*inputs)
                     return custom_forward
 
-                layer_outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(layer),
-                    hidden_states,
-                    causal_mask,
-                    use_reentrant=False
-                )
+                try:
+                    layer_outputs = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(layer),
+                        hidden_states,
+                        causal_mask,
+                        use_reentrant=False
+                    )
+                except Exception as e:
+                    print(f"Error in layer {i}: {str(e)}")
+                    print(f"hidden_states shape: {hidden_states.shape}")
+                    print(f"causal_mask shape: {causal_mask.shape}")
+                    raise
             else:
                 layer_outputs = layer(
                     hidden_states,
@@ -236,6 +264,7 @@ class SmolLM2(nn.Module):
                 )
             hidden_states = layer_outputs
 
+        # Final layer norm
         hidden_states = self.ln_f(hidden_states)
         logits = self.lm_head(hidden_states)
 
