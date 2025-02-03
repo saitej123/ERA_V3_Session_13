@@ -1,175 +1,125 @@
-# SmolLM2 Training
+# SmolLM2-135: A Compact and Efficient Language Model
 
-This repository contains the code and configuration for training the SmolLM2 language model, a transformer-based model with flash attention and mixed precision training.
-
-## Features
-
-- Flash Attention for efficient attention computation
-- Mixed precision training (automatic bf16/fp16 selection)
-- Gradient checkpointing for memory efficiency
-- Rotary positional embeddings
-- WandB integration for experiment tracking
-- Robust error handling and validation
-
-## Setup
-
-1. Install dependencies:
-```bash
-pip install torch transformers accelerate wandb flash-attn rotary-embedding-torch pyyaml
-```
-
-2. Set up WandB:
-```bash
-wandb login
-```
-
-3. Prepare your training data:
-- Place your training text in `input.txt`
-- The text will be automatically tokenized and processed in chunks
-- Supports long sequences with proper truncation and stride
-
-4. Configure the model:
-Edit `config.yaml` to adjust parameters in three main sections:
-- `model`: Architecture and features
-- `training`: Training process and optimization
-- `wandb`: Logging and visualization
+SmolLM2-135 is a compact yet powerful language model with approximately 123.6M parameters, designed for efficient training and inference while maintaining strong performance.
 
 ## Model Architecture
 
-### Core Parameters
-- Hidden dimension: 768
-- Number of layers: 12
-- Number of heads: 12
-- Intermediate size: 3072
-- Maximum sequence length: 2048
-- Vocabulary size: 32000 (auto-adjusted based on tokenizer)
+### Core Components
+- **Hidden Dimension**: 768
+- **Number of Layers**: 12
+- **Attention Heads**: 12 (64 dimensions per head)
+- **Intermediate Size**: 3072 (4x hidden dimension)
+- **Max Sequence Length**: 2048
+- **Vocabulary Size**: 50,258 (after tokenizer)
 
-### Features
-- Flash Attention support
-- Rotary positional embeddings
-- Gradient checkpointing
-- Layer normalization with stability improvements
+### Parameter Breakdown
+1. **Token Embeddings**: 38.6M parameters
+   - Embedding matrix: 50,258 × 768
 
-## Training Configuration
+2. **Transformer Layers** (×12): 84.97M parameters per layer
+   Each layer contains:
+   - Multi-Head Self-Attention
+     - Q/K/V projections: 1.77M
+     - Output projection: 0.59M
+   - MLP
+     - First layer: 2.36M
+     - Second layer: 2.36M
+   - Layer Normalization: 3.07K
+
+3. **Final Layer Norm**: 1.5K parameters
+
+Total Parameters: ~123.6M
+
+### Advanced Features
+1. **Flash Attention**
+   - Efficient attention computation
+   - Reduced memory footprint
+   - Faster training and inference
+
+2. **Rotary Embeddings**
+   - Better position encoding
+   - Improved relative position modeling
+   - Enhanced sequence understanding
+
+3. **Mixed Precision Training**
+   - BF16 precision for faster training
+   - Reduced memory usage
+   - Maintained numerical stability
+
+4. **Gradient Checkpointing**
+   - Memory-efficient backpropagation
+   - Enables training with longer sequences
+   - Trades computation for memory
+
+## Training Process
+
+### Configuration
+- Gradient Accumulation Steps: 4
+- Training Steps: 5000 + 50
+- Warmup Steps: 100
+- Evaluation Frequency: Every 100 steps
+- Checkpoint Saving: Every 500 steps
+- Text Generation: Every 200 steps
+
+### Training Strategy
+1. Initial Training Phase (5000 steps)
+   - Mixed precision training (BF16)
+   - Flash Attention for efficient computation
+   - Regular evaluation and checkpoint saving
+
+2. Extended Training Phase (50 steps)
+   - Loaded from step 5000 checkpoint
+   - Continued training with same configuration
+   - Demonstrated checkpoint restoration capability
 
 ### Optimization
-- Learning rate: 1e-4
-- Weight decay: 0.01
+- AdamW optimizer
+- Learning rate: 5e-4
+- Weight decay: 0.1
 - Gradient clipping: 1.0
-- Batch size: 12
-- Gradient accumulation steps: 4
 
-### Mixed Precision
-- Automatic dtype selection (bf16 if supported, otherwise fp16)
-- Improved numerical stability in layer normalization
-- Proper dtype handling throughout the model
+### Generation Settings
+- Temperature: 1.0
+- Top-k: 50
+- Top-p: 0.95
+- Max length: 100
 
-### Training Process
-- Evaluation every 100 steps
-- Checkpoints every 500 steps
-- Text generation samples every 200 steps
-- Cosine learning rate schedule
-- Warm-up steps: 100
+## Performance Features
 
-## WandB Integration
+1. **Memory Efficiency**
+   - Flash Attention for O(n) memory complexity
+   - Gradient checkpointing for reduced memory usage
+   - Mixed precision training for memory optimization
 
-### Logging Features
-- Model checkpoints
-- Training metrics
-- Generated text samples
-- Model parameters
-- Gradient flow
-- Learning rate curves
+2. **Training Speed**
+   - Optimized attention computation
+   - Efficient data loading and processing
+   - Parallel computation with multiple GPUs
 
-### Artifacts
-- Code snapshots
-- Checkpoints
-- Configuration files
+3. **Generation Quality**
+   - Top-k and nucleus sampling
+   - Temperature control for diversity
+   - EOS token handling for proper completion
 
-### Visualizations
-- Learning rate curves
-- Gradient flow charts
-- Loss landscapes
-- Training metrics
+## Monitoring and Logging
+- WandB integration for:
+  - Loss tracking
+  - Learning rate scheduling
+  - Generated text samples
+  - Resource utilization
+  - Training progress
 
-## Usage
+## Model Weights
+- [🤗 Hugging Face Space](link-to-your-space)
+- [GitHub Repository](link-to-your-repo)
 
-1. Start training:
-```bash
-./run_training.sh
-```
-
-2. Resume from checkpoint:
-```bash
-python train.py \
-    --config config.yaml \
-    --input_file input.txt \
-    --save_dir checkpoints \
-    --train_steps 5000 \
-    --checkpoint_path checkpoints/step_XXXX.pt
-```
-
-3. Disable WandB logging:
-```bash
-python train.py \
-    --config config.yaml \
-    --input_file input.txt \
-    --save_dir checkpoints \
-    --train_steps 5000 \
-    --disable_wandb
-```
-
-## Checkpoints
-
-Checkpoints are saved with the following information:
-- Model state
-- Optimizer state
-- Scheduler state
-- Current step
-- Current loss
-- Format: `checkpoints/step_XXXX.pt`
-
-## Safety Features
-
-1. Input Validation:
-- Token index validation
-- Proper handling of unknown tokens
-- Vocabulary size checks
-- Tensor shape validation
-
-2. Training Stability:
-- Gradient clipping
-- Mixed precision training
-- Improved layer normalization
-- Proper device placement
-
-3. Error Handling:
-- Checkpoint saving protection
-- Dataset validation
-- Proper cleanup on interruption
-- Detailed error logging
-
-## Monitoring
-
-1. Console Logging:
-- Training progress
-- Loss values
-- Learning rates
-- Error messages
-- Dataset statistics
-
-2. WandB Dashboard:
-- Real-time metrics
-- Generated samples
-- System metrics
-- Model gradients
-- Training curves
-
-## Notes
-
-- Uses gradient checkpointing to reduce memory usage
-- Automatically selects optimal mixed precision format
-- Handles long sequences with proper chunking
-- Includes robust error handling and validation
-- Supports distributed training through Accelerate
-- All metrics and artifacts are logged to WandB 
+## Citations
+```bibtex
+@misc{smollm2-135,
+  author = {Your Name},
+  title = {SmolLM2-135: A Compact and Efficient Language Model},
+  year = {2024},
+  publisher = {GitHub},
+  url = {link-to-your-repo}
+}
+``` 
