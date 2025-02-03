@@ -187,16 +187,16 @@ chmod +x train.sh
 - Graceful interruption handling
 
 ## Model Weights
-- [🤗 Hugging Face Space](link-to-your-space)
-- [GitHub Repository](link-to-your-repo)
+- [Lightning AI](https://lightning.ai/saitej/studios/era-session-13~01jhx4rv2zfkfn1twcb5ewarr9?view=public&section=featured&tab=files&layout=column&path=cloudspaces%2F01jk5xqk86shag2kx1jew0mbz0)
+- [Weights and bias](https://wandb.ai/macharlasaiteja/smollm2-training?nw=nwusermacharlasaiteja)
 
 ## Citations
 ```bibtex
 @misc{smollm2-135,
-  author = {Your Name},
+  author = {Saiteja},
   title = {SmolLM2-135: A Compact and Efficient Language Model},
-  year = {2024},
+  year = {20245},
   publisher = {GitHub},
-  url = {link-to-your-repo}
+  url = {https://github.com/saitej123}
 }
 ``` 
