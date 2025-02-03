@@ -51,11 +51,15 @@ class TextDataset(Dataset):
                 return_tensors=None,  # Return python list
             )["input_ids"]
             
-            # Concatenate all tokens
+            # Ensure token indices are within vocabulary bounds
+            vocab_size = tokenizer.vocab_size
             if isinstance(tokens[0], list):
                 tokens = [t for sublist in tokens for t in sublist]
             else:
                 tokens = list(tokens)
+            
+            # Clip token indices to vocab size
+            tokens = [t if t < vocab_size else tokenizer.unk_token_id for t in tokens]
             
             # Create overlapping chunks
             for i in range(0, len(tokens) - block_size + 1, stride):
@@ -68,6 +72,8 @@ class TextDataset(Dataset):
             
         self.examples = torch.stack(all_input_ids)
         logger.info(f"Created dataset with {len(self.examples)} examples of length {block_size}")
+        logger.info(f"Max token ID: {max(max(x) for x in all_input_ids)}")
+        logger.info(f"Vocabulary size: {vocab_size}")
 
     def __len__(self):
         return len(self.examples)
@@ -216,6 +222,10 @@ def train(args):
         # Initialize tokenizer
         tokenizer = AutoTokenizer.from_pretrained('gpt2')
         tokenizer.pad_token = tokenizer.eos_token
+        
+        # Update config with actual vocab size
+        config['model']['vocab_size'] = len(tokenizer)
+        logger.info(f"Using vocabulary size: {config['model']['vocab_size']}")
 
         # Create dataset and dataloader
         dataset = TextDataset(args.input_file, tokenizer)
@@ -225,11 +235,11 @@ def train(args):
             num_workers=0  # Disable multiprocessing for tokenizer
         )
 
-        # Initialize model, optimizer, and scheduler
+        # Initialize model with updated config
         model = SmolLM2(SmolLM2Config(**config['model']))
         
         # Move model to device before creating optimizer
-        model = model.to(device)  # Explicitly move model to device
+        model = model.to(device)
         model = accelerator.prepare_model(model)
         
         optimizer = AdamW(

@@ -7,10 +7,13 @@ set -ex
 mkdir -p checkpoints
 mkdir -p logs
 
-# Set environment variables for better performance
+# Set environment variables for better performance and debugging
 export CUDA_VISIBLE_DEVICES=0  # Use first GPU
 export TOKENIZERS_PARALLELISM=false
 export CUDA_LAUNCH_BLOCKING=1
+export TORCH_USE_CUDA_DSA=1  # Enable device-side assertions
+export TORCH_SHOW_CPP_STACKTRACES=1  # Show C++ stack traces
+export CUDA_DEVICE_MAX_CONNECTIONS=1  # Reduce concurrent CUDA operations
 
 # Configure WandB (modify these as needed)
 export WANDB_PROJECT="smollm2-training"
