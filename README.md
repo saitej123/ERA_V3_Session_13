@@ -187,6 +187,11 @@ chmod +x train.sh
 - Detailed error logging
 - Graceful interruption handling
 
+
+## Demo
+https://9dd12b2c29b5d6a53a.gradio.live/
+![DEMO](image.png)
+
 ## Model Weights
 - [Lightning AI](https://lightning.ai/saitej/studios/era-session-13~01jhx4rv2zfkfn1twcb5ewarr9?view=public&section=featured&tab=files&layout=column&path=cloudspaces%2F01jk5xqk86shag2kx1jew0mbz0)
 - [Weights and bias](https://wandb.ai/macharlasaiteja/smollm2-training?nw=nwusermacharlasaiteja)

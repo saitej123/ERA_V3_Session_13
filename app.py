@@ -17,6 +17,11 @@ def load_config(config_path: str) -> dict:
 # Initialize model and tokenizer
 def init_model(checkpoint_path: str, config_path: str):
     config = load_config(config_path)
+    
+    # Ensure layer_norm_epsilon is float
+    if 'layer_norm_epsilon' in config['model']:
+        config['model']['layer_norm_epsilon'] = float(config['model']['layer_norm_epsilon'])
+    
     model_config = SmolLM2Config(**config['model'])
     model = SmolLM2(model_config)
     
@@ -28,7 +33,8 @@ def init_model(checkpoint_path: str, config_path: str):
         model.load_state_dict(checkpoint)
     
     model.eval()
-    model = model.cuda()  # Always use CUDA
+    # Convert model to bf16 and move to CUDA
+    model = model.to(dtype=torch.bfloat16, device='cuda')
     
     # Use GPT-2 tokenizer since the model uses the same vocabulary
     tokenizer = AutoTokenizer.from_pretrained('gpt2')
@@ -38,7 +44,8 @@ def generate_text(prompt: str, max_length: int = 100, temperature: float = 0.8, 
     if not prompt:
         return "Please provide a prompt!"
     
-    input_ids = tokenizer.encode(prompt, return_tensors='pt').cuda()  # Always use CUDA
+    # Keep input_ids as Long type and move to CUDA
+    input_ids = tokenizer.encode(prompt, return_tensors='pt').to(device='cuda')
     
     with torch.no_grad():
         output_ids = model.generate(
@@ -65,6 +72,10 @@ def main():
         raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
+    
+    # Check if bf16 is supported
+    if not torch.cuda.is_bf16_supported():
+        raise RuntimeError("Your GPU does not support bfloat16. Please use a newer GPU.")
     
     print("Loading model and tokenizer...")
     model, tokenizer = init_model(checkpoint_path, config_path)
