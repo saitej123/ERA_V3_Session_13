@@ -4,7 +4,7 @@ from pathlib import Path
 import shutil
 import yaml
 import json
-from huggingface_hub import HfApi, create_repo
+from huggingface_hub import HfApi, create_repo, whoami
 
 def prepare_model_card(config_path: str, training_args: dict) -> str:
     """Create a model card for the Hugging Face Hub."""
@@ -54,8 +54,8 @@ This is an implementation of SmolLM2-135M, a lightweight language model with 135
 ```python
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-model = AutoModelForCausalLM.from_pretrained("your-username/smollm2-135m")
-tokenizer = AutoTokenizer.from_pretrained("your-username/smollm2-135m")
+model = AutoModelForCausalLM.from_pretrained("Saiteja/smollm2-135m")
+tokenizer = AutoTokenizer.from_pretrained("Saiteja/smollm2-135m")
 
 prompt = "Once upon a time"
 inputs = tokenizer(prompt, return_tensors="pt")
@@ -78,14 +78,19 @@ def upload_to_hub(
     config_path: str,
     repo_name: str,
     training_args: dict,
-    token: str,
 ):
     """Upload the model, tokenizer, and configs to the Hugging Face Hub."""
+    # Verify HF authentication
+    try:
+        user = whoami()
+        print(f"Logged in to Hugging Face as: {user['name']}")
+    except Exception as e:
+        raise RuntimeError("Please login using 'huggingface-cli login' first") from e
+
     # Create the repository
     api = HfApi()
     repo_url = create_repo(
         repo_name,
-        token=token,
         private=False,
         exist_ok=True,
     )
@@ -122,7 +127,6 @@ def upload_to_hub(
         api.upload_folder(
             folder_path=str(tmp_dir),
             repo_id=repo_name,
-            token=token,
         )
 
         print(f"Successfully uploaded model to: https://huggingface.co/{repo_name}")
@@ -136,7 +140,6 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, required=True, help="Path to the model checkpoint")
     parser.add_argument("--config_path", type=str, required=True, help="Path to the config file")
     parser.add_argument("--repo_name", type=str, required=True, help="Name of the Hugging Face repository")
-    parser.add_argument("--token", type=str, required=True, help="Hugging Face API token")
     parser.add_argument("--total_steps", type=int, required=True, help="Total training steps")
     args = parser.parse_args()
 
@@ -149,5 +152,4 @@ if __name__ == "__main__":
         config_path=args.config_path,
         repo_name=args.repo_name,
         training_args=training_args,
-        token=args.token,
     ) 
