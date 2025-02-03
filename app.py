@@ -41,7 +41,11 @@ def generate_text(prompt: str, max_length: int = 100, temperature: float = 0.8, 
             input_ids,
             max_length=max_length,
             temperature=temperature,
-            do_sample=True
+            top_k=50,
+            top_p=0.95,
+            do_sample=True,
+            pad_token_id=tokenizer.pad_token_id if tokenizer.pad_token_id is not None else None,
+            eos_token_id=tokenizer.eos_token_id if tokenizer.eos_token_id is not None else None
         )
     
     generated_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
