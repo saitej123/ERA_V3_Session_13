@@ -10,7 +10,7 @@ def parse_continue_args():
     parser.add_argument('--input_file', type=str, required=True, help='Path to input text file')
     parser.add_argument('--save_dir', type=str, required=True, help='Directory to save checkpoints')
     parser.add_argument('--train_steps', type=int, required=True, help='Number of training steps')
-    parser.add_argument('--start_step', type=int, default=5000, help='Starting step for continued training')
+    parser.add_argument('--start_step', type=int, default=5001, help='Starting step for continued training')
     return parser.parse_args()
 
 def main():
