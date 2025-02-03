@@ -159,17 +159,31 @@ class SmolLM2(nn.Module):
     def __init__(self, config: SmolLM2Config):
         super().__init__()
         self.config = config
+        
+        # Initialize embeddings
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_dim)
-        self.layers = nn.ModuleList([TransformerBlock(config) for _ in range(config.n_layers)])
-        self.ln_f = LayerNorm(config.hidden_dim, config.layer_norm_epsilon)
+        
+        # Initialize transformer layers
+        self.layers = nn.ModuleList([
+            TransformerBlock(config) for _ in range(config.n_layers)
+        ])
+        
+        # Initialize final layer norm and head
+        self.ln_f = LayerNorm(config.hidden_dim, eps=config.layer_norm_epsilon)
         self.lm_head = nn.Linear(config.hidden_dim, config.vocab_size, bias=False)
-
+        
+        # Tie weights
+        self.lm_head.weight = self.embed_tokens.weight
+        
         # Initialize weights
         self.apply(self._init_weights)
-        # Apply special scaled init to the residual projections, per GPT-2 paper
-        for pn, p in self.named_parameters():
-            if pn.endswith('fc2.weight') or pn.endswith('out_proj.weight'):
-                torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layers))
+        
+        # Register buffer for position IDs
+        self.register_buffer(
+            "position_ids",
+            torch.arange(config.max_position_embeddings).expand((1, -1)),
+            persistent=False,
+        )
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -277,4 +291,9 @@ class SmolLM2(nn.Module):
                 next_token = torch.multinomial(probs, num_samples=1)
                 input_ids = torch.cat([input_ids, next_token], dim=1)
                 
-        return input_ids 
+        return input_ids
+
+    @property
+    def device(self):
+        """Get the device the model is on."""
+        return next(self.parameters()).device 

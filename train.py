@@ -35,7 +35,8 @@ class TextDataset(Dataset):
         logger.info(f"Tokenizing text from {file_path}")
         
         # Process text in chunks to avoid memory issues
-        chunk_size = 1000000  # Process 1M characters at a time
+        chunk_size = 100000  # Process 100K characters at a time
+        stride = block_size // 2  # Use stride for overlapping chunks
         chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
         
         all_input_ids = []
@@ -43,7 +44,8 @@ class TextDataset(Dataset):
             # Tokenize without padding first
             tokens = tokenizer(
                 chunk,
-                truncation=False,
+                truncation=True,
+                max_length=block_size,
                 add_special_tokens=True,
                 return_tensors=None,  # Return python list
             )["input_ids"]
@@ -53,18 +55,17 @@ class TextDataset(Dataset):
                 tokens = [t for sublist in tokens for t in sublist]
             else:
                 tokens = list(tokens)
+            
+            # Create overlapping chunks
+            for i in range(0, len(tokens) - block_size + 1, stride):
+                chunk = tokens[i:i + block_size]
+                if len(chunk) == block_size:  # Only keep full-length chunks
+                    all_input_ids.append(torch.tensor(chunk, dtype=torch.long))
         
-            all_input_ids.extend(tokens)
-        
-        # Create chunks of block_size
-        n = len(all_input_ids)
-        self.examples = []
-        for i in range(0, n - block_size + 1, block_size):
-            chunk = all_input_ids[i:i + block_size]
-            if len(chunk) == block_size:  # Only keep full-length chunks
-                self.examples.append(torch.tensor(chunk, dtype=torch.long))
-        
-        self.examples = torch.stack(self.examples)
+        if not all_input_ids:
+            raise ValueError(f"No valid chunks created from {file_path}. Text might be too short.")
+            
+        self.examples = torch.stack(all_input_ids)
         logger.info(f"Created dataset with {len(self.examples)} examples of length {block_size}")
 
     def __len__(self):
