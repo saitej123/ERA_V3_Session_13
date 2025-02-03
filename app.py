@@ -3,6 +3,10 @@ import gradio as gr
 from transformers import AutoTokenizer
 from model.model import SmolLM2, SmolLM2Config
 import yaml
+import os
+
+# Ensure CUDA is available
+assert torch.cuda.is_available(), "CUDA is required for this demo"
 
 # Load model configuration
 def load_config(config_path: str) -> dict:
@@ -51,33 +55,46 @@ def generate_text(prompt: str, max_length: int = 100, temperature: float = 0.8, 
     generated_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
     return generated_text
 
-# Initialize model and tokenizer
-checkpoint_path = "./checkpoints/step_5051.pt"
-config_path = "config.yaml"  # Make sure this exists
-model, tokenizer = init_model(checkpoint_path, config_path)
+def main():
+    # Initialize model and tokenizer
+    checkpoint_path = "./checkpoints/step_5051.pt"
+    config_path = "config.yaml"
+    
+    # Check if files exist
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+    
+    print("Loading model and tokenizer...")
+    model, tokenizer = init_model(checkpoint_path, config_path)
+    print("Model loaded successfully!")
 
-# Create Gradio interface
-def gradio_interface(prompt, max_length, temperature):
-    return generate_text(
-        prompt=prompt,
-        max_length=max_length,
-        temperature=temperature,
-        model=model,
-        tokenizer=tokenizer
+    # Create Gradio interface
+    def gradio_interface(prompt, max_length, temperature):
+        return generate_text(
+            prompt=prompt,
+            max_length=max_length,
+            temperature=temperature,
+            model=model,
+            tokenizer=tokenizer
+        )
+
+    # Create and launch the interface
+    demo = gr.Interface(
+        fn=gradio_interface,
+        inputs=[
+            gr.Textbox(label="Prompt", placeholder="Enter your prompt here..."),
+            gr.Slider(minimum=10, maximum=500, value=100, step=10, label="Max Length"),
+            gr.Slider(minimum=0.1, maximum=2.0, value=0.8, step=0.1, label="Temperature"),
+        ],
+        outputs=gr.Textbox(label="Generated Text"),
+        title="SmolLM2 Text Generation",
+        description="Enter a prompt and the model will generate text based on it. Adjust max length and temperature to control the generation.",
     )
-
-# Create and launch the interface
-demo = gr.Interface(
-    fn=gradio_interface,
-    inputs=[
-        gr.Textbox(label="Prompt", placeholder="Enter your prompt here..."),
-        gr.Slider(minimum=10, maximum=500, value=100, step=10, label="Max Length"),
-        gr.Slider(minimum=0.1, maximum=2.0, value=0.8, step=0.1, label="Temperature"),
-    ],
-    outputs=gr.Textbox(label="Generated Text"),
-    title="SmolLM2 Text Generation",
-    description="Enter a prompt and the model will generate text based on it. Adjust max length and temperature to control the generation.",
-)
+    
+    print("Starting Gradio interface...")
+    demo.launch(share=True)
 
 if __name__ == "__main__":
-    demo.launch(share=True) 
+    main() 
