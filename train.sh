@@ -21,12 +21,7 @@ python train.py \
     --config config.yaml \
     --input_file input.txt \
     --save_dir checkpoints \
-    --train_steps 5000 \
-    --eval_steps 100 \
-    --save_steps 500 \
-    --prediction_steps 200 \
-    --mixed_precision bf16 \
-    --gradient_accumulation_steps 4
+    --train_steps 5000
 
 # Check if Phase 1 completed successfully
 if [ $? -ne 0 ]; then
@@ -41,9 +36,7 @@ echo "Phase 2: Starting extended training for 50 steps..."
 python continue_training.py \
     --config config.yaml \
     --input_file input.txt \
-    --save_dir checkpoints \
-    --mixed_precision bf16 \
-    --gradient_accumulation_steps 4
+    --save_dir checkpoints
 
 # Check if Phase 2 completed successfully
 if [ $? -ne 0 ]; then

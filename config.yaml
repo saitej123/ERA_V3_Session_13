@@ -1,18 +1,19 @@
 model:
   # Model architecture parameters
+  name: "SmolLM2-135"
   hidden_dim: 768
   n_layers: 12
   n_heads: 12
   intermediate_size: 3072
   max_position_embeddings: 2048
-  vocab_size: 32000
+  vocab_size: 50258
   
   # Regularization parameters
   dropout: 0.1
   attention_dropout: 0.1
   
   # Numerical stability parameters
-  layer_norm_epsilon: 1.0e-5
+  layer_norm_epsilon: 1e-5
   initializer_range: 0.02
   
   # Model features
@@ -23,8 +24,8 @@ model:
 
 training:
   # Optimization parameters
-  learning_rate: 1.0e-4
-  weight_decay: 0.01
+  learning_rate: 5e-4
+  weight_decay: 0.1
   max_grad_norm: 1.0
   
   # Training process parameters
@@ -32,23 +33,42 @@ training:
   gradient_accumulation_steps: 4
   
   # Training duration parameters
-  max_steps: 5000
   warmup_steps: 100
   eval_steps: 100
   save_steps: 500
-  prediction_steps: 200
+  prediction_steps: 500
   
   # Mixed precision settings
-  use_mixed_precision: true
-  mixed_precision_dtype: "auto"  # Will use bf16 if supported, otherwise fp16
+  mixed_precision: "bf16"
+  num_workers: 4
+  seed: 42
+
+generation:
+  max_length: 100
+  temperature: 1.0
+  top_k: 50
+  top_p: 0.95
+  do_sample: true
+  num_samples: 3
+  prompt_templates: [
+    "Once upon a time",
+    "In a world where",
+    "The most interesting thing about"
+  ]
 
 wandb:
   # WandB logging configuration
+  project: "smollm2-training"
   log_model: true              # Log model checkpoints to WandB
-  watch_model: true            # Track model gradients and parameters
+  watch: "gradients"            # Track model gradients and parameters
   log_batch_metrics: true      # Log metrics every batch
   log_prediction_samples: true # Log generated text samples
   log_parameters: true         # Log model parameters
+  
+  # Generation logging
+  log_generations: true        # Enable generation logging
+  generation_steps: 500        # Log generations every 500 steps
+  save_generations: true       # Save generations as WandB Table
   
   # Artifact configuration
   save_code: true             # Save code snapshot
@@ -57,4 +77,14 @@ wandb:
   # Visualization settings
   plot_learning_rate: true    # Plot learning rate curve
   plot_grad_flow: true        # Plot gradient flow
-  plot_loss_3d: true         # 3D visualization of loss landscape 
+  plot_loss_3d: true         # 3D visualization of loss landscape
+  
+  # Table configuration
+  generation_table:
+    columns: [
+      "step",
+      "prompt",
+      "generated_text",
+      "generation_time",
+      "perplexity"
+    ] 
