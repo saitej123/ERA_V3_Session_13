@@ -17,15 +17,14 @@ def init_model(checkpoint_path: str, config_path: str):
     model = SmolLM2(model_config)
     
     # Load the checkpoint
-    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    checkpoint = torch.load(checkpoint_path, map_location='cuda')
     if 'model_state_dict' in checkpoint:
         model.load_state_dict(checkpoint['model_state_dict'])
     else:
         model.load_state_dict(checkpoint)
     
     model.eval()
-    if torch.cuda.is_available():
-        model = model.cuda()
+    model = model.cuda()  # Always use CUDA
     
     # Use GPT-2 tokenizer since the model uses the same vocabulary
     tokenizer = AutoTokenizer.from_pretrained('gpt2')
@@ -35,25 +34,21 @@ def generate_text(prompt: str, max_length: int = 100, temperature: float = 0.8, 
     if not prompt:
         return "Please provide a prompt!"
     
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    input_ids = tokenizer.encode(prompt, return_tensors='pt').to(device)
+    input_ids = tokenizer.encode(prompt, return_tensors='pt').cuda()  # Always use CUDA
     
     with torch.no_grad():
         output_ids = model.generate(
             input_ids,
             max_length=max_length,
             temperature=temperature,
-            do_sample=True,
-            pad_token_id=tokenizer.pad_token_id,
-            bos_token_id=tokenizer.bos_token_id,
-            eos_token_id=tokenizer.eos_token_id
+            do_sample=True
         )
     
     generated_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
     return generated_text
 
 # Initialize model and tokenizer
-checkpoint_path = "ERA_V3_Session_13/checkpoints/step_5051.pt"
+checkpoint_path = "./checkpoints/step_5051.pt"
 config_path = "config.yaml"  # Make sure this exists
 model, tokenizer = init_model(checkpoint_path, config_path)
 
