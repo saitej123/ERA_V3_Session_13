@@ -37,21 +37,36 @@ class LayerNorm(nn.Module):
         self.dim = dim
 
     def forward(self, x):
+        # Handle input dimensions
+        orig_dtype = x.dtype
         if x.dim() == 2:
-            x = x.unsqueeze(0)  # Add batch dimension if missing
+            x = x.unsqueeze(0)
         
         if x.size(-1) != self.dim:
             raise ValueError(f"Expected last dimension to be {self.dim}, got {x.size(-1)}")
+        
+        # Cast to float32 for better numerical stability
+        x = x.to(torch.float32)
+        
+        # Check for NaN or inf values
+        if torch.isnan(x).any() or torch.isinf(x).any():
+            raise ValueError("Input tensor contains NaN or inf values")
             
         # Compute statistics along last dimension only
         mean = x.mean(dim=-1, keepdim=True)
         var = x.var(dim=-1, keepdim=True, unbiased=False)
         
-        # Normalize and scale
-        x = (x - mean) * torch.rsqrt(var + self.eps)
-        x = x * self.weight + self.bias
+        # Add eps inside sqrt for stability
+        inv_std = 1 / torch.sqrt(var + self.eps)
         
-        return x.type_as(self.weight)  # Ensure output dtype matches weights
+        # Normalize
+        x_norm = (x - mean) * inv_std
+        
+        # Scale and shift
+        x = x_norm * self.weight + self.bias
+        
+        # Return to original dtype
+        return x.to(orig_dtype)
 
 
 class MLP(nn.Module):
@@ -229,11 +244,29 @@ class SmolLM2(nn.Module):
         
         # Create causal attention mask
         seq_length = input_ids.size(-1)
-        causal_mask = torch.triu(torch.ones((seq_length, seq_length), dtype=torch.bool, device=input_ids.device), diagonal=1)
-        causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)  # [1, 1, seq_len, seq_len]
+        device = input_ids.device
+        
+        # Create causal mask [1, 1, seq_len, seq_len]
+        causal_mask = torch.triu(
+            torch.ones((seq_length, seq_length), dtype=torch.bool, device=device),
+            diagonal=1
+        ).unsqueeze(0).unsqueeze(0)
+        
+        # Convert boolean mask to float
+        causal_mask = causal_mask.to(torch.float32)
+        causal_mask = causal_mask.masked_fill(causal_mask.bool(), float('-inf'))
+        
+        # Combine with attention_mask if provided
+        if attention_mask is not None:
+            # Convert attention_mask to float and expand
+            attention_mask = attention_mask.to(torch.float32)
+            attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+            attention_mask = attention_mask.expand(-1, -1, seq_length, -1)
+            attention_mask = attention_mask.masked_fill(attention_mask == 0, float('-inf'))
+            causal_mask = causal_mask + attention_mask
         
         # Get embeddings
-        hidden_states = self.embed_tokens(input_ids)  # [batch_size, seq_len, hidden_dim]
+        hidden_states = self.embed_tokens(input_ids)
         
         # Process through transformer layers
         for i, layer in enumerate(self.layers):
@@ -254,6 +287,14 @@ class SmolLM2(nn.Module):
                     print(f"Error in layer {i}: {str(e)}")
                     print(f"hidden_states shape: {hidden_states.shape}")
                     print(f"causal_mask shape: {causal_mask.shape}")
+                    print(f"hidden_states dtype: {hidden_states.dtype}")
+                    print(f"causal_mask dtype: {causal_mask.dtype}")
+                    print(f"hidden_states device: {hidden_states.device}")
+                    print(f"causal_mask device: {causal_mask.device}")
+                    if torch.isnan(hidden_states).any():
+                        print("hidden_states contains NaN values")
+                    if torch.isinf(hidden_states).any():
+                        print("hidden_states contains inf values")
                     raise
             else:
                 layer_outputs = layer(
@@ -280,8 +321,7 @@ class SmolLM2(nn.Module):
             shift_labels = shift_labels.view(-1)
             
             # Enable loss computation in fp32
-            if shift_logits.dtype != torch.float32:
-                shift_logits = shift_logits.float()
+            shift_logits = shift_logits.float()
             
             loss = loss_fct(shift_logits, shift_labels)
 

@@ -20,6 +20,7 @@ from model.model import SmolLM2, SmolLM2Config
 
 # Set environment variables
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Add this for better error messages
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
@@ -197,14 +198,12 @@ def train(args):
         # Load configuration
         config = load_config(args.config)
         
-        # Filter out any config keys that aren't in SmolLM2Config
-        valid_config_keys = {f.name for f in fields(SmolLM2Config)}
-        model_config_dict = {k: v for k, v in config['model'].items() if k in valid_config_keys}
-        model_config = SmolLM2Config(**model_config_dict)
-
+        # Set default device
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
         # Initialize accelerator with the right settings
         accelerator = Accelerator(
-            mixed_precision='bf16' if config['training']['bf16'] else 'fp16',
+            mixed_precision='no',  # Temporarily disable mixed precision for debugging
             gradient_accumulation_steps=config['training']['gradient_accumulation_steps'],
             log_with="wandb",
             device_placement=True,
@@ -226,6 +225,7 @@ def train(args):
         model = SmolLM2(model_config)
         
         # Move model to device before creating optimizer
+        model = model.to(device)  # Explicitly move model to device
         model = accelerator.prepare_model(model)
         
         optimizer = AdamW(
