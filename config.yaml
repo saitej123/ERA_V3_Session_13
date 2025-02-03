@@ -31,17 +31,16 @@ training:
   batch_size: 12
   gradient_accumulation_steps: 4
   
-  # Mixed precision settings
-  bf16: false  # Disabled for debugging
-  
-  # Logging and saving frequencies
+  # Training duration parameters
+  max_steps: 5000
+  warmup_steps: 100
   eval_steps: 100
   save_steps: 500
   prediction_steps: 200
   
-  # Training duration parameters
-  max_steps: 5000
-  warmup_steps: 100
+  # Mixed precision settings
+  use_mixed_precision: true
+  mixed_precision_dtype: "auto"  # Will use bf16 if supported, otherwise fp16
 
 wandb:
   # WandB logging configuration

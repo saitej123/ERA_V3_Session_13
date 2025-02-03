@@ -41,39 +41,69 @@ class TextDataset(Dataset):
         chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
         
         all_input_ids = []
+        vocab_size = tokenizer.vocab_size
+        unk_token_id = tokenizer.unk_token_id
+        
+        # Add safety checks for special tokens
+        if unk_token_id is None:
+            unk_token_id = 0  # Fallback to 0 if no unk token
+            logger.warning("No unk_token_id found, using 0 as fallback")
+        
         for chunk in chunks:
-            # Tokenize without padding first
-            tokens = tokenizer(
-                chunk,
-                truncation=True,
-                max_length=block_size,
-                add_special_tokens=True,
-                return_tensors=None,  # Return python list
-            )["input_ids"]
-            
-            # Ensure token indices are within vocabulary bounds
-            vocab_size = tokenizer.vocab_size
-            if isinstance(tokens[0], list):
-                tokens = [t for sublist in tokens for t in sublist]
-            else:
-                tokens = list(tokens)
-            
-            # Clip token indices to vocab size
-            tokens = [t if t < vocab_size else tokenizer.unk_token_id for t in tokens]
-            
-            # Create overlapping chunks
-            for i in range(0, len(tokens) - block_size + 1, stride):
-                chunk = tokens[i:i + block_size]
-                if len(chunk) == block_size:  # Only keep full-length chunks
-                    all_input_ids.append(torch.tensor(chunk, dtype=torch.long))
+            try:
+                # Tokenize with explicit settings
+                tokens = tokenizer(
+                    chunk,
+                    truncation=True,
+                    max_length=block_size,
+                    add_special_tokens=True,
+                    padding=False,
+                    return_tensors=None,
+                )["input_ids"]
+                
+                # Ensure tokens is a flat list
+                if isinstance(tokens[0], list):
+                    tokens = [t for sublist in tokens for t in sublist]
+                else:
+                    tokens = list(tokens)
+                
+                # Validate and clip token indices
+                for i, token_id in enumerate(tokens):
+                    if not isinstance(token_id, int):
+                        logger.warning(f"Non-integer token ID found: {token_id}, using unk_token")
+                        tokens[i] = unk_token_id
+                    elif token_id >= vocab_size:
+                        logger.warning(f"Token ID {token_id} >= vocab_size {vocab_size}, using unk_token")
+                        tokens[i] = unk_token_id
+                    elif token_id < 0:
+                        logger.warning(f"Negative token ID found: {token_id}, using unk_token")
+                        tokens[i] = unk_token_id
+                
+                # Create overlapping chunks with validation
+                for i in range(0, len(tokens) - block_size + 1, stride):
+                    chunk = tokens[i:i + block_size]
+                    if len(chunk) == block_size:
+                        # Final validation before adding
+                        if all(0 <= t < vocab_size for t in chunk):
+                            all_input_ids.append(torch.tensor(chunk, dtype=torch.long))
+                        else:
+                            logger.warning(f"Invalid token IDs in chunk at position {i}, skipping")
+                
+            except Exception as e:
+                logger.error(f"Error processing chunk: {str(e)}")
+                continue
         
         if not all_input_ids:
-            raise ValueError(f"No valid chunks created from {file_path}. Text might be too short.")
-            
+            raise ValueError(f"No valid chunks created from {file_path}. Text might be too short or all chunks were invalid.")
+        
         self.examples = torch.stack(all_input_ids)
+        
+        # Log dataset statistics
+        max_token = max(max(x) for x in all_input_ids)
+        min_token = min(min(x) for x in all_input_ids)
         logger.info(f"Created dataset with {len(self.examples)} examples of length {block_size}")
-        logger.info(f"Max token ID: {max(max(x) for x in all_input_ids)}")
-        logger.info(f"Vocabulary size: {vocab_size}")
+        logger.info(f"Token ID range: {min_token} to {max_token} (vocab size: {vocab_size})")
+        logger.info(f"Memory usage: {self.examples.element_size() * self.examples.nelement() / 1024 / 1024:.2f} MB")
 
     def __len__(self):
         return len(self.examples)
@@ -211,24 +241,53 @@ def train(args):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"Using device: {device}")
         
-        # Initialize accelerator with the right settings
+        # Initialize accelerator with mixed precision settings
+        mixed_precision = 'bf16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'fp16'
+        logger.info(f"Using mixed precision: {mixed_precision}")
+        
         accelerator = Accelerator(
-            mixed_precision='no',  # Temporarily disable mixed precision for debugging
+            mixed_precision=mixed_precision,  # Enable mixed precision training
             gradient_accumulation_steps=config['training']['gradient_accumulation_steps'],
             log_with="wandb" if os.environ.get("WANDB_DISABLED", "").lower() != "true" else None,
             device_placement=True,
         )
 
-        # Initialize tokenizer
-        tokenizer = AutoTokenizer.from_pretrained('gpt2')
+        # Initialize tokenizer with safety settings
+        tokenizer = AutoTokenizer.from_pretrained(
+            'gpt2',
+            model_max_length=config['model']['max_position_embeddings'],
+            padding_side='right',
+            truncation_side='right',
+        )
         tokenizer.pad_token = tokenizer.eos_token
         
-        # Update config with actual vocab size
-        config['model']['vocab_size'] = len(tokenizer)
-        logger.info(f"Using vocabulary size: {config['model']['vocab_size']}")
+        # Update config with actual vocab size and add safety margin
+        vocab_size = len(tokenizer)
+        config['model']['vocab_size'] = vocab_size + 1  # Add 1 for safety
+        logger.info(f"Using vocabulary size: {config['model']['vocab_size']} (original: {vocab_size})")
+        
+        # Verify token indices will be valid
+        if tokenizer.vocab_size > config['model']['vocab_size']:
+            raise ValueError(
+                f"Tokenizer vocabulary size ({tokenizer.vocab_size}) is larger than "
+                f"model vocabulary size ({config['model']['vocab_size']})"
+            )
 
-        # Create dataset and dataloader
-        dataset = TextDataset(args.input_file, tokenizer)
+        # Create dataset and dataloader with safety checks
+        try:
+            dataset = TextDataset(args.input_file, tokenizer)
+            # Verify dataset token indices
+            max_token_id = max(max(x) for x in dataset.examples)
+            if max_token_id >= config['model']['vocab_size']:
+                raise ValueError(
+                    f"Dataset contains token ID {max_token_id} which is >= vocabulary size "
+                    f"{config['model']['vocab_size']}"
+                )
+            logger.info(f"Dataset token ID range: 0 to {max_token_id}")
+        except Exception as e:
+            logger.error(f"Failed to create dataset: {str(e)}")
+            raise
+
         dataloader = create_dataloader(
             dataset, 
             config['training']['batch_size'],
@@ -236,7 +295,16 @@ def train(args):
         )
 
         # Initialize model with updated config
-        model = SmolLM2(SmolLM2Config(**config['model']))
+        model_config = SmolLM2Config(**config['model'])
+        model = SmolLM2(model_config)
+        
+        # Add embedding size check
+        embed_size = model.embed_tokens.weight.size(0)
+        if embed_size != config['model']['vocab_size']:
+            raise ValueError(
+                f"Model embedding size ({embed_size}) doesn't match "
+                f"configured vocabulary size ({config['model']['vocab_size']})"
+            )
         
         # Move model to device before creating optimizer
         model = model.to(device)
