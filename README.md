@@ -53,30 +53,67 @@ Total Parameters: ~123.6M
 
 ## Training Process
 
-### Configuration
-- Gradient Accumulation Steps: 4
-- Training Steps: 5000 + 50
-- Warmup Steps: 100
-- Evaluation Frequency: Every 100 steps
-- Checkpoint Saving: Every 500 steps
-- Text Generation: Every 200 steps
+### Environment Setup
+```bash
+# Performance Optimizations
+export TORCH_USE_CUDA_DSA=1
+export TORCH_SHOW_CPP_STACKTRACES=1
+export CUDA_DEVICE_MAX_CONNECTIONS=1
+export TORCH_DISTRIBUTED_DEBUG=INFO
+export CUDA_LAUNCH_BLOCKING=1
+
+# WandB Configuration
+export WANDB_PROJECT="smollm2-training"
+export WANDB_WATCH="gradients"
+export WANDB_LOG_MODEL="true"
+```
+
+### Training Configuration
+- **Phase 1**: Initial Training
+  - Steps: 5000
+  - Evaluation Frequency: Every 100 steps
+  - Checkpoint Saving: Every 500 steps
+  - Text Generation: Every 200 steps
+  - Mixed Precision: BF16
+  - Gradient Accumulation Steps: 4
+
+- **Phase 2**: Continuous Training
+  - Steps: 50 (5000-5050)
+  - Loads checkpoint from step 5000
+  - Maintains all hyperparameters
+  - Continues WandB logging
+  - Preserves optimizer state
+
+### Quick Start
+```bash
+# Make the training script executable
+chmod +x train.sh
+
+# Start training
+./train.sh
+```
 
 ### Training Strategy
-1. Initial Training Phase (5000 steps)
+1. **Initial Training Phase (0-5000 steps)**
    - Mixed precision training (BF16)
    - Flash Attention for efficient computation
-   - Regular evaluation and checkpoint saving
+   - Regular evaluation and checkpointing
+   - Progress tracking in WandB
+   - Automatic checkpoint at step 5000
 
-2. Extended Training Phase (50 steps)
-   - Loaded from step 5000 checkpoint
-   - Continued training with same configuration
-   - Demonstrated checkpoint restoration capability
+2. **Extended Training Phase (5000-5050 steps)**
+   - Seamless checkpoint loading
+   - Continuous training without parameter reset
+   - Maintained optimization state
+   - Uninterrupted WandB logging
+   - Final checkpoint at step 5050
 
-### Optimization
+### Optimization Parameters
 - AdamW optimizer
 - Learning rate: 5e-4
 - Weight decay: 0.1
 - Gradient clipping: 1.0
+- Gradient accumulation steps: 4
 
 ### Generation Settings
 - Temperature: 1.0
@@ -92,9 +129,10 @@ Total Parameters: ~123.6M
    - Mixed precision training for memory optimization
 
 2. **Training Speed**
-   - Optimized attention computation
+   - Optimized CUDA operations
    - Efficient data loading and processing
    - Parallel computation with multiple GPUs
+   - Environment-level optimizations
 
 3. **Generation Quality**
    - Top-k and nucleus sampling
@@ -102,12 +140,22 @@ Total Parameters: ~123.6M
    - EOS token handling for proper completion
 
 ## Monitoring and Logging
-- WandB integration for:
+- **WandB Integration**:
   - Loss tracking
   - Learning rate scheduling
   - Generated text samples
   - Resource utilization
   - Training progress
+  - Gradient flow visualization
+  - Model checkpoints
+  - Continuous run tracking
+
+## Error Handling
+- Phase completion verification
+- Checkpoint validation
+- Training state preservation
+- Detailed error logging
+- Graceful interruption handling
 
 ## Model Weights
 - [🤗 Hugging Face Space](link-to-your-space)
